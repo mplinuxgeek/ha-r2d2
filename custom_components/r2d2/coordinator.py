@@ -61,13 +61,16 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         await self.droid.connect(ble_device)
+        _LOGGER.debug("Connected to %s, sending init", self.address)
         await self.droid.init()
         self.droid.sensor_callback = self._on_sensor_data
+        _LOGGER.debug("Enabling sensor streams on %s", self.address)
         await self.droid.enable_all_sensors()
         _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
 
     def _on_sensor_data(self, data: dict) -> None:
         """Handle live sensor push from droid. Called in the HA event loop on Linux."""
+        _LOGGER.debug("Sensor data received: %s", data)
         flat: dict[str, Any] = {}
 
         imu = data.get("imu")

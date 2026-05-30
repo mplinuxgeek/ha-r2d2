@@ -5,6 +5,8 @@ from bleak.exc import BleakError
 
 from .constants import SOP, EOP, ESC, ESC_ESC, ESC_SOP, ESC_EOP
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def build_packet(msg, payload=None, seq=0):
     """Build a framed, escaped packet. seq is per-Droid and passed in."""
@@ -44,11 +46,11 @@ async def write_gatt(client, char_uuid, packet, label):
     for response in (True, False):
         try:
             await client.write_gatt_char(char_uuid, packet, response=response)
-            logging.debug(f"[OK] {label} (response={response})")
+            _LOGGER.debug("[OK] %s (response=%s)", label, response)
             return True
         except Exception as e:
-            logging.debug(f"[FAIL] {label} (response={response}): {e}")
-    logging.error(f"Failed to send: {label}")
+            _LOGGER.debug("[FAIL] %s (response=%s): %s", label, response, e)
+    _LOGGER.error("Failed to send GATT write: %s", label)
     return False
 
 

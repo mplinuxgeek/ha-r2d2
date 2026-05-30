@@ -125,6 +125,7 @@ class DroidClient:
     # ------------------------------------------------------------------
 
     def _on_notification(self, sender, data) -> None:
+        _LOGGER.debug("BLE notification from %s: %d bytes: %s", sender, len(data), data.hex())
         # Raw 0xD8 only appears as EOP (payload 0xD8 is always escaped as [0xAB, 0x50])
         self._packet_buffer.extend(data)
 
@@ -148,14 +149,16 @@ class DroidClient:
 
     def _process_packet(self, packet) -> None:
         if len(packet) < 6:
+            _LOGGER.debug("Packet too short (%d bytes), discarding", len(packet))
             return
 
         body = unescape_packet(packet)
         if len(body) < 4:
+            _LOGGER.debug("Unescaped body too short (%d bytes), discarding", len(body))
             return
 
         flags, did, cid, seq = body[0], body[1], body[2], body[3]
-        _LOGGER.debug("Packet did=%02x cid=%02x seq=%s body_len=%d", did, cid, seq, len(body))
+        _LOGGER.debug("Packet flags=%02x did=%02x cid=%02x seq=%s body_len=%d", flags, did, cid, seq, len(body))
 
         if did == 0x18 and cid == 0x02:
             self._handle_sensor_packet(body[4:-1])  # strip CHK
