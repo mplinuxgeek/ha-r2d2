@@ -1,0 +1,269 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Sphero R2D2 / Q5 Droid",
+        "description": "Enter the Bluetooth MAC address of your droid. The address is visible in your Bluetooth settings when the droid is powered on.",
+        "data": {
+          "address": "MAC Address",
+          "name": "Name (optional)"
+        },
+        "data_description": {
+          "address": "Bluetooth MAC address in the format AA:BB:CC:DD:EE:FF",
+          "name": "Friendly name for the droid (leave blank to use auto-generated name)"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Found {name}",
+        "description": "Do you want to add the droid **{name}** ({address}) to Home Assistant?"
+      }
+    },
+    "error": {
+      "invalid_address": "Invalid MAC address format. Use AA:BB:CC:DD:EE:FF."
+    },
+    "abort": {
+      "already_configured": "This droid is already configured.",
+      "no_devices_found": "No R2D2 / Q5 droids found nearby."
+    }
+  },
+  "entity": {
+    "button": {
+      "init": {
+        "name": "Initialise"
+      },
+      "power_off": {
+        "name": "Power Off"
+      },
+      "tripod": {
+        "name": "Tripod Stance"
+      },
+      "bipod": {
+        "name": "Bipod Stance"
+      },
+      "waddle_on": {
+        "name": "Start Waddling"
+      },
+      "waddle_off": {
+        "name": "Stop Waddling"
+      },
+      "stop": {
+        "name": "Stop Driving"
+      },
+      "reset_yaw": {
+        "name": "Reset Yaw"
+      }
+    },
+    "light": {
+      "front_led": {
+        "name": "Front LED"
+      },
+      "back_led": {
+        "name": "Back LED"
+      },
+      "holo_projector": {
+        "name": "Holo Projector"
+      },
+      "logic_display": {
+        "name": "Logic Display"
+      }
+    },
+    "number": {
+      "dome_rotation": {
+        "name": "Dome Rotation"
+      }
+    },
+    "select": {
+      "animation": {
+        "name": "Animation",
+        "state": {
+          "alarm": "Alarm",
+          "angry": "Angry",
+          "attention": "Attention",
+          "frustrated": "Frustrated",
+          "drive": "Drive",
+          "excited": "Excited",
+          "search": "Search",
+          "short_circuit": "Short Circuit",
+          "laugh": "Laugh",
+          "no": "No",
+          "retreat": "Retreat",
+          "fiery": "Fiery",
+          "understood": "Understood",
+          "yes": "Yes",
+          "scan": "Scan",
+          "surprised": "Surprised",
+          "idle_1": "Idle 1",
+          "idle_2": "Idle 2",
+          "idle_3": "Idle 3",
+          "wwm_angry": "WWM Angry",
+          "wwm_anxious": "WWM Anxious",
+          "wwm_bow": "WWM Bow",
+          "wwm_concern": "WWM Concern",
+          "wwm_curious": "WWM Curious",
+          "wwm_double_take": "WWM Double Take",
+          "wwm_excited": "WWM Excited",
+          "wwm_fiery": "WWM Fiery",
+          "wwm_frustrated": "WWM Frustrated",
+          "wwm_happy": "WWM Happy",
+          "wwm_jittery": "WWM Jittery",
+          "wwm_laugh": "WWM Laugh",
+          "wwm_long_shake": "WWM Long Shake",
+          "wwm_no": "WWM No",
+          "wwm_ominous": "WWM Ominous",
+          "wwm_relieved": "WWM Relieved",
+          "wwm_sad": "WWM Sad",
+          "wwm_scared": "WWM Scared",
+          "wwm_shake": "WWM Shake",
+          "wwm_surprised": "WWM Surprised",
+          "wwm_taunting": "WWM Taunting",
+          "wwm_whisper": "WWM Whisper",
+          "wwm_yelling": "WWM Yelling",
+          "wwm_yoohoo": "WWM Yoohoo",
+          "motor": "Motor",
+          "happy": "Happy",
+          "sad": "Sad"
+        }
+      },
+      "audio": {
+        "name": "Audio",
+        "state": {
+          "fall": "Fall",
+          "hit_1": "Hit 1",
+          "hit_2": "Hit 2",
+          "hit_3": "Hit 3",
+          "hit_4": "Hit 4",
+          "hit_5": "Hit 5",
+          "hit_6": "Hit 6",
+          "hit_7": "Hit 7",
+          "hit_8": "Hit 8",
+          "hit_9": "Hit 9",
+          "hit_10": "Hit 10",
+          "step_1": "Step 1",
+          "step_2": "Step 2",
+          "step_3": "Step 3",
+          "step_4": "Step 4",
+          "step_5": "Step 5",
+          "step_6": "Step 6",
+          "access_panels": "Access Panels",
+          "annoyed": "Annoyed",
+          "burnout": "Burnout",
+          "engage_hyperdrive": "Engage Hyperdrive",
+          "head_spin": "Head Spin",
+          "scream": "Scream",
+          "scream_2": "Scream 2",
+          "short_out": "Short Out",
+          "alarm_1": "Alarm 1",
+          "alarm_2": "Alarm 2",
+          "alarm_3": "Alarm 3",
+          "alarm_4": "Alarm 4",
+          "alarm_5": "Alarm 5",
+          "alarm_6": "Alarm 6",
+          "alarm_7": "Alarm 7",
+          "alarm_8": "Alarm 8",
+          "alarm_9": "Alarm 9",
+          "alarm_10": "Alarm 10",
+          "alarm_12": "Alarm 12",
+          "alarm_13": "Alarm 13",
+          "alarm_14": "Alarm 14",
+          "alarm_15": "Alarm 15",
+          "alarm_16": "Alarm 16",
+          "chatty_1": "Chatty 1",
+          "chatty_2": "Chatty 2",
+          "chatty_3": "Chatty 3",
+          "chatty_4": "Chatty 4",
+          "chatty_5": "Chatty 5",
+          "chatty_6": "Chatty 6",
+          "chatty_7": "Chatty 7",
+          "chatty_8": "Chatty 8",
+          "chatty_9": "Chatty 9",
+          "chatty_10": "Chatty 10",
+          "excited_1": "Excited 1",
+          "excited_2": "Excited 2",
+          "excited_3": "Excited 3",
+          "excited_4": "Excited 4",
+          "excited_5": "Excited 5",
+          "excited_6": "Excited 6",
+          "excited_7": "Excited 7",
+          "excited_8": "Excited 8",
+          "hey_1": "Hey 1",
+          "hey_2": "Hey 2",
+          "hey_3": "Hey 3",
+          "hey_4": "Hey 4",
+          "hey_5": "Hey 5",
+          "hey_6": "Hey 6",
+          "hey_7": "Hey 7",
+          "hey_8": "Hey 8",
+          "laugh_1": "Laugh 1",
+          "laugh_2": "Laugh 2",
+          "laugh_3": "Laugh 3",
+          "laugh_4": "Laugh 4",
+          "negative_1": "Negative 1",
+          "negative_2": "Negative 2",
+          "negative_3": "Negative 3",
+          "negative_4": "Negative 4",
+          "negative_5": "Negative 5",
+          "negative_6": "Negative 6",
+          "negative_7": "Negative 7",
+          "negative_8": "Negative 8",
+          "negative_9": "Negative 9",
+          "negative_10": "Negative 10",
+          "positive_1": "Positive 1",
+          "positive_2": "Positive 2",
+          "positive_3": "Positive 3",
+          "positive_4": "Positive 4",
+          "positive_5": "Positive 5",
+          "positive_6": "Positive 6",
+          "positive_7": "Positive 7",
+          "positive_8": "Positive 8",
+          "positive_9": "Positive 9",
+          "positive_10": "Positive 10",
+          "sad_1": "Sad 1",
+          "sad_2": "Sad 2",
+          "sad_3": "Sad 3",
+          "sad_4": "Sad 4",
+          "sad_5": "Sad 5",
+          "sad_6": "Sad 6",
+          "sad_7": "Sad 7",
+          "sad_8": "Sad 8",
+          "sad_9": "Sad 9",
+          "sad_10": "Sad 10"
+        }
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "imu_pitch": {
+        "name": "IMU Pitch"
+      },
+      "imu_roll": {
+        "name": "IMU Roll"
+      },
+      "imu_yaw": {
+        "name": "IMU Yaw"
+      },
+      "accel_x": {
+        "name": "Accelerometer X"
+      },
+      "accel_y": {
+        "name": "Accelerometer Y"
+      },
+      "accel_z": {
+        "name": "Accelerometer Z"
+      },
+      "head_angle": {
+        "name": "Head Angle"
+      },
+      "gyro_x": {
+        "name": "Gyroscope X"
+      },
+      "gyro_y": {
+        "name": "Gyroscope Y"
+      },
+      "gyro_z": {
+        "name": "Gyroscope Z"
+      }
+    }
+  }
+}
