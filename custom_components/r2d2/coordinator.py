@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for the R2D2 integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any
@@ -85,6 +86,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Enabling sensor streams on %s", self.address)
         await self.droid.enable_all_sensors()
         _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
+        self._reset_led_state()
 
         if self._cancel_bt_callback is None:
             self._cancel_bt_callback = async_register_callback(
@@ -116,6 +118,16 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning("Auto-reconnect to %s failed: %s", self.address, exc)
         finally:
             self._reconnecting = False
+
+    def _reset_led_state(self) -> None:
+        """Mark all LEDs as off after every connect.
+
+        RestoreEntity may have populated led_state with the last-known on/off
+        values, but the droid's LEDs are always off after a power cycle.
+        """
+        for key, state in self.led_state.items():
+            self.led_state[key] = {**state, "on": False}
+        self.async_update_listeners()
 
     def _on_sensor_data(self, data: dict) -> None:
         """Handle live sensor push from droid. Called in the HA event loop on Linux."""
@@ -152,35 +164,58 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         ble_device may be supplied directly (e.g. from an advertisement
         callback) to avoid a cache lookup that may return None if the
         connectable-scanner cache entry has expired.
+
+        Retries up to 3 times with a 5-second pause between attempts to
+        handle transient "no backend" errors from the HA bluetooth stack.
         """
         if self.droid.connected:
             await self.droid.disconnect()
 
-        if ble_device is None:
-            # Try connectable first; fall back to any known entry so the
-            # manual Reconnect button still works even if HA's connectable
-            # cache has expired since the last advertisement.
-            ble_device = async_ble_device_from_address(
-                self.hass, self.address, connectable=True
-            )
-        if ble_device is None:
-            ble_device = async_ble_device_from_address(
-                self.hass, self.address, connectable=False
-            )
-        if ble_device is None:
-            raise HomeAssistantError(
-                f"Droid {self.address} not found — power it on and ensure it is in range."
-            )
+        _MAX_ATTEMPTS = 3
+        _RETRY_DELAY = 5  # seconds
 
-        await self.droid.connect(ble_device)
-        await self.droid.init()
-        self.droid.sensor_callback = self._on_sensor_data
-        await self.droid.enable_all_sensors()
-        self.sensor_data.clear()
-        _LOGGER.info("R2D2 droid %s reconnected", self.address)
-        # Immediately refresh so all entities leave unknown without waiting
-        # for the next scheduled poll (up to 30 s away).
-        self.hass.async_create_task(self.async_refresh())
+        last_exc: Exception | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                device = ble_device
+                if device is None:
+                    device = async_ble_device_from_address(
+                        self.hass, self.address, connectable=True
+                    )
+                if device is None:
+                    device = async_ble_device_from_address(
+                        self.hass, self.address, connectable=False
+                    )
+                if device is None:
+                    raise HomeAssistantError(
+                        f"Droid {self.address} not found — power it on and ensure it is in range."
+                    )
+
+                await self.droid.connect(device)
+                await self.droid.init()
+                self.droid.sensor_callback = self._on_sensor_data
+                await self.droid.enable_all_sensors()
+                self.sensor_data.clear()
+                self._reset_led_state()
+                _LOGGER.info("R2D2 droid %s reconnected (attempt %d)", self.address, attempt)
+                # Immediately refresh so all entities leave unknown without
+                # waiting for the next scheduled poll (up to 30 s away).
+                self.hass.async_create_task(self.async_refresh())
+                return
+            except HomeAssistantError:
+                raise  # "not found" is not a transient error — fail immediately
+            except Exception as exc:
+                last_exc = exc
+                _LOGGER.warning(
+                    "Reconnect attempt %d/%d to %s failed: %s",
+                    attempt, _MAX_ATTEMPTS, self.address, exc,
+                )
+                if attempt < _MAX_ATTEMPTS:
+                    await asyncio.sleep(_RETRY_DELAY)
+
+        raise HomeAssistantError(
+            f"Failed to reconnect to {self.address} after {_MAX_ATTEMPTS} attempts: {last_exc}"
+        )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll battery and RSSI every update interval."""
