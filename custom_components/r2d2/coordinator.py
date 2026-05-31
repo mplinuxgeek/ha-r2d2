@@ -104,12 +104,14 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.droid.connected and not self._reconnecting:
             _LOGGER.info("Droid %s detected advertising, auto-reconnecting", self.address)
             self._reconnecting = True
-            self.hass.async_create_task(self._auto_reconnect())
+            # Pass the BLEDevice straight from the advertisement so we never
+            # need to look it up again (the cache may have expired by then).
+            self.hass.async_create_task(self._auto_reconnect(service_info.device))
 
-    async def _auto_reconnect(self) -> None:
+    async def _auto_reconnect(self, ble_device=None) -> None:
         """Attempt reconnection; called from the BLE advertisement callback."""
         try:
-            await self.async_reconnect()
+            await self.async_reconnect(ble_device=ble_device)
         except Exception as exc:
             _LOGGER.warning("Auto-reconnect to %s failed: %s", self.address, exc)
         finally:
@@ -144,12 +146,27 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_data.update(flat)
         self.async_set_updated_data({**(self.data or {}), **flat})
 
-    async def async_reconnect(self) -> None:
-        """Re-establish BLE connection after the droid wakes from sleep."""
+    async def async_reconnect(self, ble_device=None) -> None:
+        """Re-establish BLE connection after the droid wakes from sleep.
+
+        ble_device may be supplied directly (e.g. from an advertisement
+        callback) to avoid a cache lookup that may return None if the
+        connectable-scanner cache entry has expired.
+        """
         if self.droid.connected:
             await self.droid.disconnect()
 
-        ble_device = async_ble_device_from_address(self.hass, self.address, connectable=True)
+        if ble_device is None:
+            # Try connectable first; fall back to any known entry so the
+            # manual Reconnect button still works even if HA's connectable
+            # cache has expired since the last advertisement.
+            ble_device = async_ble_device_from_address(
+                self.hass, self.address, connectable=True
+            )
+        if ble_device is None:
+            ble_device = async_ble_device_from_address(
+                self.hass, self.address, connectable=False
+            )
         if ble_device is None:
             raise HomeAssistantError(
                 f"Droid {self.address} not found — power it on and ensure it is in range."
