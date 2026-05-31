@@ -51,6 +51,9 @@
       },
       "reset_yaw": {
         "name": "Reset Yaw"
+      },
+      "reconnect": {
+        "name": "Reconnect"
       }
     },
     "light": {

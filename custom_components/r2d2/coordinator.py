@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.components.bluetooth import async_ble_device_from_address, async_last_service_info
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -102,6 +102,24 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Re-send init and re-enable sensor streaming (e.g. after power-off)."""
         await self.droid.init()
         await self.droid.enable_all_sensors()
+
+    async def async_reconnect(self) -> None:
+        """Re-establish BLE connection after the droid wakes from sleep."""
+        if self.droid.connected:
+            await self.droid.disconnect()
+
+        ble_device = async_ble_device_from_address(self.hass, self.address, connectable=True)
+        if ble_device is None:
+            raise HomeAssistantError(
+                f"Droid {self.address} not found — power it on and ensure it is in range."
+            )
+
+        await self.droid.connect(ble_device)
+        await self.droid.init()
+        self.droid.sensor_callback = self._on_sensor_data
+        await self.droid.enable_all_sensors()
+        self.sensor_data.clear()
+        _LOGGER.info("R2D2 droid %s reconnected", self.address)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll battery and RSSI every update interval."""
