@@ -43,7 +43,8 @@ class DroidClient:
         self._last_command_time: float | None = None
         self._seq = 0
         self._packet_buffer: list[int] = []
-        self.sensor_callback = None  # callable(dict) — receives live sensor data
+        self.sensor_callback = None   # callable(dict) — receives live sensor data
+        self.reconnect_hook = None    # async callable() — set by coordinator
 
     # ------------------------------------------------------------------
     # Connection
@@ -117,6 +118,12 @@ class DroidClient:
                 await self.init()
 
     async def _send(self, msg, payload=None, label=""):
+        if not self.connected:
+            if self.reconnect_hook:
+                _LOGGER.info("Not connected — auto-waking before '%s'", label or msg.hex())
+                await self.reconnect_hook()
+            else:
+                raise RuntimeError("Not connected — main characteristic unavailable")
         await self.ensure_awake()
         if self._main_char is None:
             raise RuntimeError("Not connected — main characteristic unavailable")

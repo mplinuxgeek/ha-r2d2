@@ -58,6 +58,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.address: str = entry.data[CONF_ADDRESS]
         self.droid_name: str = entry.data.get(CONF_NAME, f"Droid {self.address}")
         self.droid = DroidClient(self.address)
+        self.droid.reconnect_hook = self.async_reconnect
         self.sensor_data: dict[str, Any] = {}
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
