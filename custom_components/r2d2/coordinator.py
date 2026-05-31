@@ -5,9 +5,16 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.components.bluetooth import async_ble_device_from_address, async_last_service_info
+from homeassistant.components.bluetooth import (
+    BluetoothChange,
+    BluetoothScanningMode,
+    BluetoothServiceInfoBleak,
+    async_ble_device_from_address,
+    async_last_service_info,
+    async_register_callback,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -51,6 +58,8 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.droid_name: str = entry.data.get(CONF_NAME, f"Droid {self.address}")
         self.droid = DroidClient(self.address)
         self.sensor_data: dict[str, Any] = {}
+        self._cancel_bt_callback = None
+        self._reconnecting: bool = False
 
     async def async_connect(self) -> None:
         """Connect to the droid, run handshake, enable sensors."""
@@ -68,6 +77,35 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Enabling sensor streams on %s", self.address)
         await self.droid.enable_all_sensors()
         _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
+
+        if self._cancel_bt_callback is None:
+            self._cancel_bt_callback = async_register_callback(
+                self.hass,
+                self._on_ble_advertisement,
+                {"address": self.address, "connectable": True},
+                BluetoothScanningMode.ACTIVE,
+            )
+
+    @callback
+    def _on_ble_advertisement(
+        self,
+        service_info: BluetoothServiceInfoBleak,
+        change: BluetoothChange,
+    ) -> None:
+        """Fire when the droid is seen advertising — reconnect if needed."""
+        if not self.droid.connected and not self._reconnecting:
+            _LOGGER.info("Droid %s detected advertising, auto-reconnecting", self.address)
+            self._reconnecting = True
+            self.hass.async_create_task(self._auto_reconnect())
+
+    async def _auto_reconnect(self) -> None:
+        """Attempt reconnection; called from the BLE advertisement callback."""
+        try:
+            await self.async_reconnect()
+        except Exception as exc:
+            _LOGGER.warning("Auto-reconnect to %s failed: %s", self.address, exc)
+        finally:
+            self._reconnecting = False
 
     def _on_sensor_data(self, data: dict) -> None:
         """Handle live sensor push from droid. Called in the HA event loop on Linux."""
@@ -139,6 +177,9 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         return current
 
     async def async_disconnect(self) -> None:
-        """Disconnect from the droid."""
+        """Disconnect from the droid and cancel the BLE advertisement watcher."""
+        if self._cancel_bt_callback:
+            self._cancel_bt_callback()
+            self._cancel_bt_callback = None
         await self.droid.disconnect()
         _LOGGER.info("R2D2 droid %s disconnected", self.address)
