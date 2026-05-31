@@ -71,6 +71,9 @@
       "dome_rotation": {
         "name": "Dome Rotation"
       },
+      "dome_speed": {
+        "name": "Dome Speed"
+      },
       "volume": {
         "name": "Volume"
       }

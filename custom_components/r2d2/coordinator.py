@@ -61,6 +61,8 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_data: dict[str, Any] = {}
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
+        self.dome_angle: float = 0.0   # last commanded angle
+        self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         # Shared LED state — all light/switch entities read and write here so
         # they stay in sync without knowing about each other.
         self.led_state: dict[str, Any] = {
