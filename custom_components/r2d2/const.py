@@ -13,5 +13,6 @@ ATTR_HEAD_ANGLE = "head_angle"
 ATTR_GYRO_X = "gyro_x"
 ATTR_GYRO_Y = "gyro_y"
 ATTR_GYRO_Z = "gyro_z"
+ATTR_RSSI = "rssi"
 
-PLATFORMS = ["button", "light", "number", "select", "sensor"]
+PLATFORMS = ["button", "light", "number", "select", "sensor", "switch"]

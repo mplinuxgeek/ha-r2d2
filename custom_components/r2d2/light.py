@@ -66,6 +66,7 @@ class R2D2RGBLight(CoordinatorEntity[R2D2Coordinator], LightEntity):
         )
         self._is_on: bool = False
         self._rgb_color: tuple[int, int, int] = (255, 255, 255)
+        self._brightness: int = 255
 
     @property
     def available(self) -> bool:
@@ -78,6 +79,11 @@ class R2D2RGBLight(CoordinatorEntity[R2D2Coordinator], LightEntity):
         return self._is_on
 
     @property
+    def brightness(self) -> int:
+        """Return the current brightness (0-255)."""
+        return self._brightness
+
+    @property
     def rgb_color(self) -> tuple[int, int, int]:
         """Return the current RGB colour."""
         return self._rgb_color
@@ -86,8 +92,11 @@ class R2D2RGBLight(CoordinatorEntity[R2D2Coordinator], LightEntity):
         """Turn the light on."""
         if ATTR_RGB_COLOR in kwargs:
             self._rgb_color = kwargs[ATTR_RGB_COLOR]
+        if ATTR_BRIGHTNESS in kwargs:
+            self._brightness = kwargs[ATTR_BRIGHTNESS]
         r, g, b = self._rgb_color
-        await self._send_color(r, g, b)
+        factor = self._brightness / 255
+        await self._send_color(int(r * factor), int(g * factor), int(b * factor))
         self._is_on = True
         self.async_write_ha_state()
 

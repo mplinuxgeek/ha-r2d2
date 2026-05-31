@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.components.bluetooth import async_ble_device_from_address
+from homeassistant.components.bluetooth import async_ble_device_from_address, async_last_service_info
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -25,6 +25,7 @@ from .const import (
     ATTR_GYRO_X,
     ATTR_GYRO_Y,
     ATTR_GYRO_Z,
+    ATTR_RSSI,
 )
 from .droid.client import DroidClient
 
@@ -97,8 +98,13 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_data.update(flat)
         self.async_set_updated_data({**(self.data or {}), **flat})
 
+    async def async_reinit(self) -> None:
+        """Re-send init and re-enable sensor streaming (e.g. after power-off)."""
+        await self.droid.init()
+        await self.droid.enable_all_sensors()
+
     async def _async_update_data(self) -> dict[str, Any]:
-        """Poll battery level every update interval."""
+        """Poll battery and RSSI every update interval."""
         if not self.droid.connected:
             raise UpdateFailed("Droid is not connected")
 
@@ -106,6 +112,11 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         current = dict(self.data or {})
         if battery is not None:
             current["battery"] = battery
+
+        service_info = async_last_service_info(self.hass, self.address, connectable=True)
+        if service_info is not None:
+            current[ATTR_RSSI] = service_info.rssi
+
         current.update(self.sensor_data)
         return current
 

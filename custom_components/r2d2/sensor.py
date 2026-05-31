@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, DEGREE
+from homeassistant.const import PERCENTAGE, DEGREE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -29,6 +29,7 @@ from .const import (
     ATTR_GYRO_X,
     ATTR_GYRO_Y,
     ATTR_GYRO_Z,
+    ATTR_RSSI,
 )
 from .coordinator import R2D2Coordinator
 
@@ -122,6 +123,15 @@ SENSOR_DESCRIPTIONS: tuple[R2D2SensorEntityDescription, ...] = (
         data_key=ATTR_GYRO_Z,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=_UNIT_DEG_S,
+    ),
+    R2D2SensorEntityDescription(
+        key=ATTR_RSSI,
+        translation_key="rssi",
+        data_key=ATTR_RSSI,
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        entity_registry_enabled_default=False,
     ),
 )
 

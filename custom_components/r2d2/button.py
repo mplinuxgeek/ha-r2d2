@@ -25,7 +25,7 @@ BUTTON_DESCRIPTIONS: tuple[R2D2ButtonEntityDescription, ...] = (
     R2D2ButtonEntityDescription(
         key="init",
         translation_key="init",
-        press_fn=lambda c: c.droid.init(),
+        press_fn=lambda c: c.async_reinit(),
     ),
     R2D2ButtonEntityDescription(
         key="power_off",
