@@ -60,6 +60,14 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_data: dict[str, Any] = {}
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
+        # Shared LED state — all light/switch entities read and write here so
+        # they stay in sync without knowing about each other.
+        self.led_state: dict[str, Any] = {
+            "front_led":      {"on": False, "rgb": (255, 255, 255), "effect": None},
+            "back_led":       {"on": False, "rgb": (255, 255, 255), "effect": None},
+            "holo_projector": {"on": False, "brightness": 255},
+            "logic_display":  {"on": False, "brightness": 255},
+        }
 
     async def async_connect(self) -> None:
         """Connect to the droid, run handshake, enable sensors."""
