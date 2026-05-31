@@ -28,9 +28,6 @@
   },
   "entity": {
     "button": {
-      "init": {
-        "name": "Power On"
-      },
       "power_off": {
         "name": "Power Off"
       },

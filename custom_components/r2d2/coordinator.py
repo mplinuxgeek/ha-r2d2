@@ -136,11 +136,6 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_data.update(flat)
         self.async_set_updated_data({**(self.data or {}), **flat})
 
-    async def async_reinit(self) -> None:
-        """Re-send init and re-enable sensor streaming (e.g. after power-off)."""
-        await self.droid.init()
-        await self.droid.enable_all_sensors()
-
     async def async_reconnect(self) -> None:
         """Re-establish BLE connection after the droid wakes from sleep."""
         if self.droid.connected:
