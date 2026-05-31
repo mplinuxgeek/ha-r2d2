@@ -178,6 +178,9 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.droid.enable_all_sensors()
         self.sensor_data.clear()
         _LOGGER.info("R2D2 droid %s reconnected", self.address)
+        # Immediately refresh so all entities leave unknown without waiting
+        # for the next scheduled poll (up to 30 s away).
+        self.hass.async_create_task(self.async_refresh())
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll battery and RSSI every update interval."""

@@ -274,6 +274,9 @@
     "switch": {
       "all_lights": {
         "name": "All Lights"
+      },
+      "keep_awake": {
+        "name": "Keep Awake"
       }
     }
   }
