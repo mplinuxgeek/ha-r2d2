@@ -51,7 +51,14 @@ class DroidClient:
 
     async def connect(self, ble_device) -> None:
         """Connect to the droid using a BLEDevice obtained from HA's bluetooth stack."""
+        # Reset all per-session state so a reconnect on the same instance
+        # behaves identically to a fresh DroidClient (which is what a reload gets).
         self._main_char = None
+        self._last_command_time = None  # prevents ensure_awake recursion
+        self._asleep = False
+        self._intentional_disconnect = False
+        self._seq = 0
+        self._packet_buffer.clear()
         self._client = BleakClient(ble_device, disconnected_callback=self._on_disconnect)
         await self._client.connect()
         if not self._client.is_connected:
