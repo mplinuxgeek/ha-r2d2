@@ -85,6 +85,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.droid.sensor_callback = self._on_sensor_data
         _LOGGER.debug("Enabling sensor streams on %s", self.address)
         await self.droid.enable_all_sensors()
+        await self.droid.animate("wwm_whisper")
         _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
         self._reset_led_state()
 
@@ -195,6 +196,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.droid.init()
                 self.droid.sensor_callback = self._on_sensor_data
                 await self.droid.enable_all_sensors()
+                await self.droid.animate("wwm_whisper")
                 self.sensor_data.clear()
                 self._reset_led_state()
                 _LOGGER.info("R2D2 droid %s reconnected (attempt %d)", self.address, attempt)
