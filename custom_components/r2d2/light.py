@@ -85,10 +85,14 @@ class R2D2RGBLight(CoordinatorEntity[R2D2Coordinator], LightEntity, RestoreEntit
         )
 
     async def async_added_to_hass(self) -> None:
+        """Restore last colour/effect but never the on/off state.
+
+        The droid always powers up with LEDs off so restoring on=True would
+        show the toggles as on while the droid is actually dark.
+        """
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
         if last_state and last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            self.coordinator.led_state[self._key]["on"] = last_state.state == STATE_ON
             if rgb := last_state.attributes.get(ATTR_RGB_COLOR):
                 self.coordinator.led_state[self._key]["rgb"] = (
                     int(rgb[0]), int(rgb[1]), int(rgb[2])
@@ -187,10 +191,10 @@ class R2D2BrightnessLight(CoordinatorEntity[R2D2Coordinator], LightEntity, Resto
         )
 
     async def async_added_to_hass(self) -> None:
+        """Restore last brightness but never the on/off state."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
         if last_state and last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            self.coordinator.led_state[self._key]["on"] = last_state.state == STATE_ON
             if (b := last_state.attributes.get(ATTR_BRIGHTNESS)) is not None:
                 self.coordinator.led_state[self._key]["brightness"] = int(b)
 
