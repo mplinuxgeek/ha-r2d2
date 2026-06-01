@@ -9,6 +9,7 @@ from typing import Any
 
 _HEARTBEAT_TIMEOUT = 15   # seconds of sensor silence → phantom connection
 _WATCHDOG_INTERVAL = 15   # how often the watchdog fires
+_SENSOR_PUSH_INTERVAL = 1.0  # min seconds between coordinator pushes from sensor stream
 
 from homeassistant.components.bluetooth import (
     BluetoothChange,
@@ -57,18 +58,19 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=f"R2D2 {entry.data[CONF_ADDRESS]}",
             update_interval=_POLL_INTERVAL,
         )
-        self.hass = hass
         self.entry = entry
         self.address: str = entry.data[CONF_ADDRESS]
         self.droid_name: str = entry.data.get(CONF_NAME, f"Droid {self.address}")
         self.droid = DroidClient(self.address)
-        self.droid.reconnect_hook = self.async_reconnect
+        self.droid.reconnect_hook = self._reconnect_for_send
         self.sensor_data: dict[str, Any] = {}
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
         self._reconnect_lock = asyncio.Lock()
         self._last_sensor_time: float | None = None   # heartbeat: last sensor packet
         self._connected_at: float | None = None       # heartbeat: when BLE connected
+        self._last_push_time: float | None = None      # throttle: last sensor push to HA
+        self._phantom_revive_attempted: bool = False   # watchdog: tried reviving stream
         self.dome_angle: float = 0.0   # last commanded angle
         self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         self.keep_awake: bool = False  # set by R2D2KeepAwakeSwitch
@@ -110,25 +112,62 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     async def _heartbeat_watchdog(self) -> None:
-        """Runs every 15s; disconnects phantom BLE connections.
+        """Runs every 15s; recovers stalled sensor streams and disconnects phantoms.
 
-        A phantom is when Bleak reports connected but sensor data has gone
-        silent (droid powered off).  Disconnecting purges the OS socket so the
-        next advertisement triggers a clean reconnect.
+        Sensor silence on a BLE-connected client has two causes:
+          * a phantom — droid powered off but the OS socket is held open
+            (common behind a BT proxy); or
+          * a live droid whose sensor stream merely stalled.
+
+        We first try to revive the stream by re-enabling sensors.  Only if that
+        write fails (link truly dead) or the stream stays silent through the
+        next grace window do we tear the link down — this avoids loop-killing a
+        healthy connection that briefly stopped streaming.  Disconnecting purges
+        the OS socket so the next advertisement triggers a clean reconnect.
         """
         while True:
             await asyncio.sleep(_WATCHDOG_INTERVAL)
-            if self.droid.connected and not self.is_connected:
-                _LOGGER.info(
-                    "_heartbeat_watchdog: sensor silence > %ds on connected client — "
-                    "phantom connection, disconnecting to allow clean reconnect",
-                    _HEARTBEAT_TIMEOUT,
-                )
+
+            if not self.droid.connected:
+                self._phantom_revive_attempted = False
+                continue
+
+            if self.is_connected:
+                # Connected; clear the revive flag once real packets are flowing.
+                if self._last_sensor_time is not None:
+                    self._phantom_revive_attempted = False
+                continue
+
+            # droid.connected is True but is_connected is False → sensor silence.
+            if not self._phantom_revive_attempted:
+                self._phantom_revive_attempted = True
                 try:
-                    await self.droid.disconnect()
+                    _LOGGER.debug(
+                        "_heartbeat_watchdog: sensor silence — re-enabling sensors to revive stream"
+                    )
+                    await self.droid.enable_all_sensors()
+                    # Fresh grace window: wait for the stream to resume before
+                    # deciding this is a phantom.
+                    self._connected_at = time.monotonic()
+                    self._last_sensor_time = None
+                    continue
                 except Exception as exc:
-                    _LOGGER.debug("_heartbeat_watchdog: disconnect error: %s", exc)
-                self.async_update_listeners()
+                    _LOGGER.debug(
+                        "_heartbeat_watchdog: sensor re-enable failed (%s) — link dead", exc
+                    )
+
+            # Revive already tried and stream still silent → genuine phantom.
+            _LOGGER.info(
+                "_heartbeat_watchdog: sensor silence > %ds on connected client — "
+                "phantom connection, disconnecting to allow clean reconnect",
+                _HEARTBEAT_TIMEOUT,
+            )
+            try:
+                await self.droid.disconnect()
+            except Exception as exc:
+                _LOGGER.debug("_heartbeat_watchdog: disconnect error: %s", exc)
+            self._phantom_revive_attempted = False
+            self.async_update_listeners()
 
     async def async_connect(self) -> None:
         """Connect to the droid, run handshake, enable sensors."""
@@ -232,7 +271,14 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             flat[ATTR_GYRO_Z] = gyro.get("z")
 
         self.sensor_data.update(flat)
-        self.async_set_updated_data({**(self.data or {}), **flat})
+        # Throttle pushes to HA: the stream can fire many packets/second, but
+        # entities only need ~1 Hz.  Latest values are always stored above and
+        # flushed by the 30s poll, so the most recent reading is never lost for
+        # long.  Heartbeat (_last_sensor_time) is updated on every packet.
+        now = self._last_sensor_time
+        if self._last_push_time is None or (now - self._last_push_time) >= _SENSOR_PUSH_INTERVAL:
+            self._last_push_time = now
+            self.async_set_updated_data({**(self.data or {}), **flat})
 
     async def async_reconnect(self, ble_device=None, force: bool = False) -> None:
         """Re-establish BLE connection after the droid wakes from sleep.
@@ -248,33 +294,50 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         _LOGGER.debug("async_reconnect: waiting for lock (ble_device=%s force=%s)", ble_device, force)
         async with self._reconnect_lock:
-            _LOGGER.debug("async_reconnect: lock acquired, droid.connected=%s", self.droid.connected)
-            if self.droid.connected and not force:
-                _LOGGER.debug("async_reconnect: already connected, returning")
+            # Re-evaluate state *inside* the lock — another caller may have
+            # already (re)connected while we waited.  Use is_connected (not raw
+            # droid.connected) so a phantom is never mistaken for healthy.
+            _LOGGER.debug(
+                "async_reconnect: lock acquired, droid.connected=%s is_connected=%s",
+                self.droid.connected, self.is_connected,
+            )
+            if self.is_connected and not force:
+                _LOGGER.debug("async_reconnect: already connected and alive, returning")
                 return
             if self.droid.connected:
-                _LOGGER.debug("async_reconnect: force=True — disconnecting phantom connection")
+                # Phantom (BLE up, sensor-silent) or force=True → purge the
+                # socket before rebuilding so the OS handle is clean.
+                _LOGGER.debug("async_reconnect: disconnecting stale/phantom connection before reconnect")
                 await self.droid.disconnect()
 
-            device = ble_device
-            if device is None:
-                _LOGGER.debug("async_reconnect: looking up device in BT cache (connectable=True)")
-                device = async_ble_device_from_address(self.hass, self.address, connectable=True)
-                if device is None:
+            def _resolve_device():
+                dev = async_ble_device_from_address(self.hass, self.address, connectable=True)
+                if dev is None:
                     _LOGGER.debug("async_reconnect: not found connectable, trying connectable=False")
-                    device = async_ble_device_from_address(self.hass, self.address, connectable=False)
+                    dev = async_ble_device_from_address(self.hass, self.address, connectable=False)
+                return dev
 
-            if device is None:
+            # Fail fast if the droid is nowhere in the BT cache.
+            if ble_device is None and _resolve_device() is None:
                 _LOGGER.warning("async_reconnect: device %s not in BT cache", self.address)
                 raise HomeAssistantError(
                     f"Droid {self.address} not in range — try again once it is advertising."
                 )
 
-            _LOGGER.debug("async_reconnect: device found (%s), attempting connection", device)
             last_exc: Exception | None = None
             for attempt in range(1, 4):
+                # Re-resolve the device each attempt when we weren't handed an
+                # explicit one — a connectable entry may only appear in the
+                # cache after the droid has advertised for a moment.
+                device = ble_device if ble_device is not None else _resolve_device()
+                if device is None:
+                    _LOGGER.debug("async_reconnect: device not yet resolvable on attempt %d", attempt)
+                    last_exc = HomeAssistantError("device not in BT cache")
+                    if attempt < 3:
+                        await asyncio.sleep(5)
+                    continue
                 try:
-                    _LOGGER.debug("async_reconnect: connect attempt %d/3", attempt)
+                    _LOGGER.debug("async_reconnect: connect attempt %d/3 (device=%s)", attempt, device)
                     await self.droid.connect(device)
                     _LOGGER.debug("async_reconnect: BLE connected, sending init")
                     await self.droid.init()
@@ -325,17 +388,28 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         Called by all entity command methods so controls work whether the
         droid is on or off — if it's off, we connect first then run the command.
 
-        If BLE shows connected but sensor data is silent (phantom), we force-
-        disconnect before reconnecting so the OS socket is cleanly purged.
+        Phantom handling (BLE up but sensor-silent) is decided inside
+        async_reconnect under the lock, so concurrent commands can never race
+        to tear down a connection one of them just rebuilt.
         """
         if self.is_connected:
             return
-        # Phantom: BLE connected but sensor-silent → force-disconnect first
-        force = self.droid.connected
-        _LOGGER.debug(
-            "async_ensure_connected: not connected (phantom=%s), attempting connect", force
-        )
-        await self.async_reconnect(force=force)
+        _LOGGER.debug("async_ensure_connected: not connected, attempting connect")
+        await self.async_reconnect()
+
+    async def _reconnect_for_send(self) -> None:
+        """Reconnect hook handed to the DroidClient for auto-wake on send.
+
+        Guards against re-entering async_reconnect while a reconnect is already
+        in progress: the reconnect lock is non-reentrant, so if a handshake/
+        init write inside async_reconnect finds the link briefly down and calls
+        back through here, awaiting the held lock would deadlock.  When a
+        reconnect is already underway we raise instead — the caller's own retry/
+        wait loop handles it.
+        """
+        if self._reconnect_lock.locked():
+            raise HomeAssistantError("reconnect already in progress")
+        await self.async_reconnect()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll battery and RSSI every 30s; binary sensor driven by is_connected."""
