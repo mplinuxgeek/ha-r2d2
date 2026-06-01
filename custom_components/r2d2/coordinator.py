@@ -62,6 +62,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_data: dict[str, Any] = {}
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
+        self._reconnect_lock = asyncio.Lock()
         self.dome_angle: float = 0.0   # last commanded angle
         self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         # Shared LED state — all light/switch entities read and write here so
@@ -164,69 +165,68 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_reconnect(self, ble_device=None) -> None:
         """Re-establish BLE connection after the droid wakes from sleep.
 
-        Two-phase:
-        1. Device lookup — if the droid is not yet in HA's BT scanner cache
-           (still waking, slow advertising) poll every 5 s for up to 30 s.
-        2. Connection — retry up to 3 times with 5 s delay for transient
-           BLE errors ("no backend", etc.).
+        Serialised by _reconnect_lock so concurrent callers (button press +
+        BLE advertisement callback) never race. The second caller waits for
+        the first to finish and returns immediately if already connected.
 
-        ble_device may be supplied directly from an advertisement callback
-        to skip the lookup phase entirely.
+        Two-phase once the lock is held:
+        1. Device lookup — poll HA's BT cache every 5 s for up to 30 s.
+        2. Connection  — retry up to 3 times for transient BLE errors.
         """
-        if self.droid.connected:
-            await self.droid.disconnect()
+        async with self._reconnect_lock:
+            if self.droid.connected:
+                return  # another caller already reconnected
 
-        # --- Phase 1: find the device ---
-        device = ble_device
-        if device is None:
-            device = (
-                async_ble_device_from_address(self.hass, self.address, connectable=True)
-                or async_ble_device_from_address(self.hass, self.address, connectable=False)
-            )
-
-        if device is None:
-            _LOGGER.info(
-                "Droid %s not in BT cache, waiting up to 30s for advertisement...",
-                self.address,
-            )
-            for _ in range(6):          # 6 × 5 s = 30 s
-                await asyncio.sleep(5)
+            # --- Phase 1: find the device ---
+            device = ble_device
+            if device is None:
                 device = (
                     async_ble_device_from_address(self.hass, self.address, connectable=True)
                     or async_ble_device_from_address(self.hass, self.address, connectable=False)
                 )
-                if device is not None:
-                    break
 
-        if device is None:
-            raise HomeAssistantError(
-                f"Droid {self.address} not found after 30 s — ensure it is powered on and in range."
-            )
-
-        # --- Phase 2: connect (retry for transient BLE errors) ---
-        last_exc: Exception | None = None
-        for attempt in range(1, 4):
-            try:
-                await self.droid.connect(device)
-                await self.droid.init()
-                self.droid.sensor_callback = self._on_sensor_data
-                await self.droid.enable_all_sensors()
-                self.sensor_data.clear()
-                self._reset_led_state()
-                _LOGGER.info("R2D2 droid %s reconnected (attempt %d)", self.address, attempt)
-                self.hass.async_create_task(self.async_refresh())
-                return
-            except Exception as exc:
-                last_exc = exc
-                _LOGGER.warning(
-                    "Reconnect attempt %d/3 to %s failed: %s", attempt, self.address, exc,
+            if device is None:
+                _LOGGER.info(
+                    "Droid %s not in BT cache, waiting up to 30 s...", self.address
                 )
-                if attempt < 3:
+                for _ in range(6):          # 6 × 5 s = 30 s
                     await asyncio.sleep(5)
+                    device = (
+                        async_ble_device_from_address(self.hass, self.address, connectable=True)
+                        or async_ble_device_from_address(self.hass, self.address, connectable=False)
+                    )
+                    if device is not None:
+                        break
 
-        raise HomeAssistantError(
-            f"Failed to reconnect to {self.address} after 3 attempts: {last_exc}"
-        )
+            if device is None:
+                raise HomeAssistantError(
+                    f"Droid {self.address} not found after 30 s — ensure it is powered on and in range."
+                )
+
+            # --- Phase 2: connect (retry for transient BLE errors) ---
+            last_exc: Exception | None = None
+            for attempt in range(1, 4):
+                try:
+                    await self.droid.connect(device)
+                    await self.droid.init()
+                    self.droid.sensor_callback = self._on_sensor_data
+                    await self.droid.enable_all_sensors()
+                    self.sensor_data.clear()
+                    self._reset_led_state()
+                    _LOGGER.info("R2D2 droid %s reconnected (attempt %d)", self.address, attempt)
+                    self.hass.async_create_task(self.async_refresh())
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    _LOGGER.warning(
+                        "Reconnect attempt %d/3 to %s failed: %s", attempt, self.address, exc,
+                    )
+                    if attempt < 3:
+                        await asyncio.sleep(5)
+
+            raise HomeAssistantError(
+                f"Failed to reconnect to {self.address} after 3 attempts: {last_exc}"
+            )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll battery and RSSI every update interval."""
