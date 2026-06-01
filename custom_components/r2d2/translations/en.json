@@ -27,6 +27,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Connected"
+      }
+    },
     "button": {
       "power_off": {
         "name": "Power Off"

@@ -64,7 +64,8 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
         self._reconnect_lock = asyncio.Lock()
-        self._last_sensor_time: float | None = None   # heartbeat timestamp
+        self._last_sensor_time: float | None = None   # heartbeat: last sensor packet
+        self._connected_at: float | None = None       # heartbeat: when BLE connected
         self.dome_angle: float = 0.0   # last commanded angle
         self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         # Shared LED state — all light/switch entities read and write here so
@@ -91,6 +92,8 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.droid.sensor_callback = self._on_sensor_data
         _LOGGER.debug("Enabling sensor streams on %s", self.address)
         await self.droid.enable_all_sensors()
+        self._connected_at = time.monotonic()
+        self._last_sensor_time = None
         _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
         self._reset_led_state()
 
@@ -236,7 +239,8 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.droid.sensor_callback = self._on_sensor_data
                     await self.droid.enable_all_sensors()
                     self.sensor_data.clear()
-                    self._last_sensor_time = None   # reset so heartbeat gives it time to arrive
+                    self._connected_at = time.monotonic()
+                    self._last_sensor_time = None
                     self._reset_led_state()
                     _LOGGER.info("async_reconnect: droid %s reconnected (attempt %d)", self.address, attempt)
                     self.hass.async_create_task(self.async_refresh())
@@ -262,18 +266,31 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.droid.connected:
             raise UpdateFailed("Droid is not connected")
 
-        # Heartbeat check — sensor data should arrive every ~150ms.
-        # If it has been silent for too long the BLE connection is a phantom.
+        # Heartbeat — sensor data flows every ~150ms when truly connected.
+        # Declare phantom if:
+        #   a) data was flowing but went silent for >15s, OR
+        #   b) data never arrived within 30s of connecting (phantom from the start)
+        now = time.monotonic()
         if self._last_sensor_time is not None:
-            silence = time.monotonic() - self._last_sensor_time
-            _LOGGER.debug("_async_update_data: sensor heartbeat silence=%.1fs", silence)
+            silence = now - self._last_sensor_time
+            _LOGGER.debug("_async_update_data: heartbeat silence=%.1fs", silence)
             if silence > self._HEARTBEAT_TIMEOUT:
                 _LOGGER.warning(
-                    "No sensor data for %.0fs — phantom connection detected, forcing reconnect",
+                    "Heartbeat: no sensor data for %.0fs — phantom connection, forcing reconnect",
                     silence,
                 )
                 self.hass.async_create_task(self.async_reconnect(force=True))
                 raise UpdateFailed("Phantom connection — reconnecting")
+        elif self._connected_at is not None:
+            wait = now - self._connected_at
+            _LOGGER.debug("_async_update_data: waiting for first sensor packet (%.1fs since connect)", wait)
+            if wait > 30:
+                _LOGGER.warning(
+                    "Heartbeat: no sensor data %.0fs after connecting — phantom connection, forcing reconnect",
+                    wait,
+                )
+                self.hass.async_create_task(self.async_reconnect(force=True))
+                raise UpdateFailed("Phantom connection (no sensor data) — reconnecting")
 
         battery = await self.droid.battery()
         current = dict(self.data or {})

@@ -97,8 +97,8 @@ class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, Rest
     _attr_translation_key = "keep_awake"
 
     _IDLE_ANIMATIONS = ["idle_1", "idle_2", "idle_3"]
-    _MIN_INTERVAL = 360   # 6 minutes
-    _MAX_INTERVAL = 540   # 9 minutes
+    _MIN_INTERVAL = 120   # 2 minutes
+    _MAX_INTERVAL = 240   # 4 minutes
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
