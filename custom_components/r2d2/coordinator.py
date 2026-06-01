@@ -107,21 +107,30 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         change: BluetoothChange,
     ) -> None:
         """Fire when the droid is seen advertising — reconnect if needed."""
+        _LOGGER.debug(
+            "_on_ble_advertisement: address=%s rssi=%s change=%s connected=%s reconnecting=%s",
+            service_info.address, service_info.rssi, change, self.droid.connected, self._reconnecting,
+        )
         if not self.droid.connected and not self._reconnecting:
-            _LOGGER.info("Droid %s detected advertising, auto-reconnecting", self.address)
+            _LOGGER.info("_on_ble_advertisement: droid seen advertising, triggering auto-reconnect")
             self._reconnecting = True
-            # Pass the BLEDevice straight from the advertisement so we never
-            # need to look it up again (the cache may have expired by then).
             self.hass.async_create_task(self._auto_reconnect(service_info.device))
+        else:
+            _LOGGER.debug(
+                "_on_ble_advertisement: skipping (connected=%s reconnecting=%s)",
+                self.droid.connected, self._reconnecting,
+            )
 
     async def _auto_reconnect(self, ble_device=None) -> None:
-        """Attempt reconnection; called from the BLE advertisement callback."""
+        """Attempt reconnection triggered by BLE advertisement callback."""
+        _LOGGER.debug("_auto_reconnect: starting (ble_device=%s)", ble_device)
         try:
             await self.async_reconnect(ble_device=ble_device)
         except Exception as exc:
-            _LOGGER.warning("Auto-reconnect to %s failed: %s", self.address, exc)
+            _LOGGER.warning("_auto_reconnect: failed: %s", exc)
         finally:
             self._reconnecting = False
+            _LOGGER.debug("_auto_reconnect: done, reconnecting flag cleared")
 
     def _reset_led_state(self) -> None:
         """Mark all LEDs as off after every connect.
@@ -129,6 +138,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         RestoreEntity may have populated led_state with the last-known on/off
         values, but the droid's LEDs are always off after a power cycle.
         """
+        _LOGGER.debug("_reset_led_state: marking all LEDs off and notifying entities")
         for key, state in self.led_state.items():
             self.led_state[key] = {**state, "on": False}
         self.async_update_listeners()
@@ -170,38 +180,50 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         The lock is held only during the actual connection attempt so it
         never blocks other callers for more than a few seconds.
         """
+        _LOGGER.debug("async_reconnect: waiting for lock (ble_device=%s)", ble_device)
         async with self._reconnect_lock:
+            _LOGGER.debug("async_reconnect: lock acquired, droid.connected=%s", self.droid.connected)
             if self.droid.connected:
+                _LOGGER.debug("async_reconnect: already connected, returning")
                 return
 
-            device = ble_device or (
-                async_ble_device_from_address(self.hass, self.address, connectable=True)
-                or async_ble_device_from_address(self.hass, self.address, connectable=False)
-            )
+            device = ble_device
+            if device is None:
+                _LOGGER.debug("async_reconnect: looking up device in BT cache (connectable=True)")
+                device = async_ble_device_from_address(self.hass, self.address, connectable=True)
+                if device is None:
+                    _LOGGER.debug("async_reconnect: not found connectable, trying connectable=False")
+                    device = async_ble_device_from_address(self.hass, self.address, connectable=False)
 
             if device is None:
+                _LOGGER.warning("async_reconnect: device %s not in BT cache", self.address)
                 raise HomeAssistantError(
                     f"Droid {self.address} not in range — try again once it is advertising."
                 )
 
+            _LOGGER.debug("async_reconnect: device found (%s), attempting connection", device)
             last_exc: Exception | None = None
             for attempt in range(1, 4):
                 try:
+                    _LOGGER.debug("async_reconnect: connect attempt %d/3", attempt)
                     await self.droid.connect(device)
+                    _LOGGER.debug("async_reconnect: BLE connected, sending init")
                     await self.droid.init()
+                    _LOGGER.debug("async_reconnect: init OK, enabling sensors")
                     self.droid.sensor_callback = self._on_sensor_data
                     await self.droid.enable_all_sensors()
                     self.sensor_data.clear()
                     self._reset_led_state()
-                    _LOGGER.info("R2D2 droid %s reconnected (attempt %d)", self.address, attempt)
+                    _LOGGER.info("async_reconnect: droid %s reconnected (attempt %d)", self.address, attempt)
                     self.hass.async_create_task(self.async_refresh())
                     return
                 except Exception as exc:
                     last_exc = exc
                     _LOGGER.warning(
-                        "Reconnect attempt %d/3 to %s failed: %s", attempt, self.address, exc,
+                        "async_reconnect: attempt %d/3 failed: %s", attempt, exc,
                     )
                     if attempt < 3:
+                        _LOGGER.debug("async_reconnect: waiting 5s before retry")
                         await asyncio.sleep(5)
 
             raise HomeAssistantError(
@@ -210,6 +232,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll battery and RSSI every update interval."""
+        _LOGGER.debug("_async_update_data: polling (connected=%s)", self.droid.connected)
         if not self.droid.connected:
             raise UpdateFailed("Droid is not connected")
 
@@ -217,10 +240,14 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         current = dict(self.data or {})
         if battery is not None:
             current["battery"] = battery
+            _LOGGER.debug("_async_update_data: battery=%d%%", battery)
 
         service_info = async_last_service_info(self.hass, self.address, connectable=True)
         if service_info is not None:
             current[ATTR_RSSI] = service_info.rssi
+            _LOGGER.debug("_async_update_data: rssi=%d dBm", service_info.rssi)
+        else:
+            _LOGGER.debug("_async_update_data: no service_info for RSSI")
 
         current.update(self.sensor_data)
         return current
