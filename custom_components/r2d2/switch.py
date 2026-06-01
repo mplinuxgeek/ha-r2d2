@@ -6,6 +6,8 @@ import logging
 import random
 from typing import Any
 
+from homeassistant.components.logbook import async_log_entry
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -160,5 +162,12 @@ class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, Rest
             try:
                 await self.coordinator.droid.animate(anim)
                 _LOGGER.debug("Keep-awake: played %s", anim)
+                async_log_entry(
+                    self.hass,
+                    self.coordinator.droid_name,
+                    f"keep-awake: played {anim}",
+                    DOMAIN,
+                    self.entity_id,
+                )
             except Exception as exc:
                 _LOGGER.debug("Keep-awake animation failed: %s", exc)
