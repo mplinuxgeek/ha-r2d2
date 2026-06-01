@@ -35,6 +35,8 @@ class DroidClient:
 
     IDLE_SLEEP_TIMEOUT = 290  # seconds idle before droid sleeps (sensor stream
                               # stops ~5 min) → next command must re-init + re-arm sensors
+    WAKE_SETTLE = 2.0         # seconds for a just-woken droid's motor controller to come
+                              # online before the first command (else stance/move is dropped)
 
     def __init__(self, address: str) -> None:
         self.address = address
@@ -144,6 +146,10 @@ class DroidClient:
         try:
             await self.init()
             await self.enable_all_sensors()
+            # Let the motor controller come online before the caller's command
+            # lands — a stance/move sent immediately after wake is acked but
+            # dropped (the dome/animation system boots first, motors lag).
+            await asyncio.sleep(self.WAKE_SETTLE)
         finally:
             self._waking = False
 

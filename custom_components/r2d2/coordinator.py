@@ -13,6 +13,8 @@ _CONNECT_GRACE = 10       # seconds to wait for first packet after (re)connect/r
 _SENSOR_PUSH_INTERVAL = 1.0  # min seconds between coordinator pushes from sensor stream
 _VERIFY_DELAY = 2.0       # seconds between post-connect sensor-stream re-enable kicks
 _VERIFY_ATTEMPTS = 3      # how many times to re-enable sensors if the stream doesn't start
+_WAKE_SETTLE = 2.0        # seconds to let a just-woken droid's motor controller come
+                          # online before the first command (else stance/move is dropped)
 
 from homeassistant.components.bluetooth import (
     BluetoothChange,
@@ -457,11 +459,17 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.droid.connected:
             _LOGGER.debug(
                 "async_ensure_connected: link up but sensors idle — "
-                "waking in place (command's ensure_awake re-arms sensors)"
+                "waking in place (command's ensure_awake re-arms sensors and settles)"
             )
             return
         _LOGGER.debug("async_ensure_connected: not connected, attempting connect")
         await self.async_reconnect()
+        # The reconnect just woke a sleeping droid; its motor controller needs a
+        # moment before it acts on the first command (a stance/move sent
+        # immediately is acked but dropped).  ensure_awake covers the link-up
+        # wake-in-place path; this covers the full-reconnect path.
+        _LOGGER.debug("async_ensure_connected: settling %.1fs after wake-reconnect", _WAKE_SETTLE)
+        await asyncio.sleep(_WAKE_SETTLE)
 
     async def _reconnect_for_send(self) -> None:
         """Reconnect hook handed to the DroidClient for auto-wake on send.
