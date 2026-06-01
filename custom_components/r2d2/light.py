@@ -26,16 +26,17 @@ from .coordinator import R2D2Coordinator
 _LOGGER = logging.getLogger(__name__)
 
 COLOUR_PRESETS: dict[str, tuple[int, int, int]] = {
-    "White":   (255, 255, 255),
-    "Red":     (255,   0,   0),
-    "Orange":  (255, 128,   0),
-    "Yellow":  (255, 220,   0),
-    "Green":   (  0, 255,   0),
-    "Cyan":    (  0, 255, 255),
-    "Blue":    (  0,   0, 255),
-    "Purple":  (128,   0, 255),
-    "Magenta": (255,   0, 255),
-    "Pink":    (255,   0, 128),
+    "White":    (255, 255, 255),
+    "Red":      (255,   0,   0),
+    "Orange":   (255, 128,   0),
+    "Yellow":   (255, 220,   0),
+    "Green":    (  0, 255,   0),
+    "Cyan":     (  0, 255, 255),
+    "Blue":     (  0,   0, 255),
+    "R2D2 Blue":(  0, 102, 204),
+    "Purple":   (128,   0, 255),
+    "Magenta":  (255,   0, 255),
+    "Pink":     (255,   0, 128),
 }
 
 

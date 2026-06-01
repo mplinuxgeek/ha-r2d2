@@ -65,12 +65,12 @@ class R2D2AllLightsSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         droid = self.coordinator.droid
-        await droid.set_front_led(0, 0, 255)
-        await droid.set_back_led(0, 255, 0)
+        await droid.set_front_led(255, 0, 0)
+        await droid.set_back_led(0, 102, 204)
         await droid.set_holo_projector(255)
         await droid.set_logic_display(255)
-        self.coordinator.led_state["front_led"]      = {"on": True, "rgb": (0, 0, 255), "effect": "Blue"}
-        self.coordinator.led_state["back_led"]       = {"on": True, "rgb": (0, 255, 0), "effect": "Green"}
+        self.coordinator.led_state["front_led"]      = {"on": True, "rgb": (255, 0, 0),     "effect": "Red"}
+        self.coordinator.led_state["back_led"]       = {"on": True, "rgb": (0, 102, 204),   "effect": "R2D2 Blue"}
         self.coordinator.led_state["holo_projector"] = {"on": True, "brightness": 255}
         self.coordinator.led_state["logic_display"]  = {"on": True, "brightness": 255}
         self.coordinator.async_update_listeners()

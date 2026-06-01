@@ -68,8 +68,8 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Shared LED state — all light/switch entities read and write here so
         # they stay in sync without knowing about each other.
         self.led_state: dict[str, Any] = {
-            "front_led":      {"on": False, "rgb": (255, 255, 255), "effect": None},
-            "back_led":       {"on": False, "rgb": (255, 255, 255), "effect": None},
+            "front_led":      {"on": False, "rgb": (255, 0, 0), "effect": "Red"},
+            "back_led":       {"on": False, "rgb": (0, 102, 204), "effect": "R2D2 Blue"},
             "holo_projector": {"on": False, "brightness": 255},
             "logic_display":  {"on": False, "brightness": 255},
         }
@@ -93,10 +93,12 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reset_led_state()
 
         if self._cancel_bt_callback is None:
+            # No connectable filter — the droid may advertise as non-connectable
+            # when first waking, so we need to catch all advertisements.
             self._cancel_bt_callback = async_register_callback(
                 self.hass,
                 self._on_ble_advertisement,
-                {"address": self.address, "connectable": True},
+                {"address": self.address},
                 BluetoothScanningMode.ACTIVE,
             )
 
