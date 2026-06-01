@@ -493,6 +493,13 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Re-assert the latest drive vector at a fixed rate until it goes stale."""
         try:
             await self.async_ensure_connected()  # wake + settle on first drive
+            # Driving needs the control system (stabilization) on, else the droid
+            # accepts the roll command (and assumes tripod) but the motors never
+            # engage.  Enable it once at the start of the drive session.
+            try:
+                await self.droid.set_stabilization(1)
+            except Exception as exc:
+                _LOGGER.debug("_drive_loop: enable stabilization failed: %s", exc)
             while (
                 self._drive_target is not None
                 and (time.monotonic() - self._drive_last) <= _DRIVE_TIMEOUT
