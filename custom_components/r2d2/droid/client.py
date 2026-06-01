@@ -121,7 +121,20 @@ class DroidClient:
         if not self.connected:
             if self.reconnect_hook:
                 _LOGGER.info("Not connected — auto-waking before '%s'", label or msg.hex())
-                await self.reconnect_hook()
+                try:
+                    await self.reconnect_hook()
+                except Exception:
+                    # Device not in BT cache yet — wait up to 45 s for the BLE
+                    # advertisement callback to trigger auto-reconnect, then retry.
+                    _LOGGER.info("Droid not found, waiting up to 45 s for it to advertise...")
+                    for _ in range(9):      # 9 × 5 s = 45 s
+                        await asyncio.sleep(5)
+                        if self.connected:
+                            break
+                    else:
+                        raise RuntimeError(
+                            f"Timed out waiting for droid to come online"
+                        )
             else:
                 raise RuntimeError("Not connected — main characteristic unavailable")
         await self.ensure_awake()

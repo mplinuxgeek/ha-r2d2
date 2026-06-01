@@ -165,45 +165,25 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_reconnect(self, ble_device=None) -> None:
         """Re-establish BLE connection after the droid wakes from sleep.
 
-        Serialised by _reconnect_lock so concurrent callers (button press +
-        BLE advertisement callback) never race. The second caller waits for
-        the first to finish and returns immediately if already connected.
-
-        Two-phase once the lock is held:
-        1. Device lookup — poll HA's BT cache every 5 s for up to 30 s.
-        2. Connection  — retry up to 3 times for transient BLE errors.
+        Serialised by _reconnect_lock — concurrent callers never race and
+        the second caller returns immediately once the first has connected.
+        The lock is held only during the actual connection attempt so it
+        never blocks other callers for more than a few seconds.
         """
         async with self._reconnect_lock:
             if self.droid.connected:
-                return  # another caller already reconnected
+                return
 
-            # --- Phase 1: find the device ---
-            device = ble_device
-            if device is None:
-                device = (
-                    async_ble_device_from_address(self.hass, self.address, connectable=True)
-                    or async_ble_device_from_address(self.hass, self.address, connectable=False)
-                )
-
-            if device is None:
-                _LOGGER.info(
-                    "Droid %s not in BT cache, waiting up to 30 s...", self.address
-                )
-                for _ in range(6):          # 6 × 5 s = 30 s
-                    await asyncio.sleep(5)
-                    device = (
-                        async_ble_device_from_address(self.hass, self.address, connectable=True)
-                        or async_ble_device_from_address(self.hass, self.address, connectable=False)
-                    )
-                    if device is not None:
-                        break
+            device = ble_device or (
+                async_ble_device_from_address(self.hass, self.address, connectable=True)
+                or async_ble_device_from_address(self.hass, self.address, connectable=False)
+            )
 
             if device is None:
                 raise HomeAssistantError(
-                    f"Droid {self.address} not found after 30 s — ensure it is powered on and in range."
+                    f"Droid {self.address} not in range — try again once it is advertising."
                 )
 
-            # --- Phase 2: connect (retry for transient BLE errors) ---
             last_exc: Exception | None = None
             for attempt in range(1, 4):
                 try:
