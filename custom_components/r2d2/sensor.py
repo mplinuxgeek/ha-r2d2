@@ -185,4 +185,9 @@ class R2D2Sensor(CoordinatorEntity[R2D2Coordinator], SensorEntity):
         """Return the sensor value from coordinator data."""
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.get(self.entity_description.data_key)
+        val = self.coordinator.data.get(self.entity_description.data_key)
+        # HA rejects non-finite floats for measurement sensors — return None
+        # (unavailable) rather than letting them crash async_write_ha_state.
+        if isinstance(val, float) and not (val == val and val != float("inf") and val != float("-inf")):
+            return None
+        return val

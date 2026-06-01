@@ -64,6 +64,7 @@ class R2D2AllLightsSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity):
         return all(v["on"] for v in self.coordinator.led_state.values())
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_ensure_connected()
         droid = self.coordinator.droid
         await droid.set_front_led(255, 0, 0)
         await droid.set_back_led(0, 102, 204)
@@ -76,6 +77,7 @@ class R2D2AllLightsSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity):
         self.coordinator.async_update_listeners()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_ensure_connected()
         droid = self.coordinator.droid
         await droid.set_front_led(0, 0, 0)
         await droid.set_back_led(0, 0, 0)
@@ -118,6 +120,7 @@ class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, Rest
         if last_state and last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             if last_state.state == STATE_ON:
                 self._is_on = True
+                self.coordinator.keep_awake = True
                 self._start_task()
 
     async def async_will_remove_from_hass(self) -> None:
@@ -133,11 +136,13 @@ class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, Rest
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
+        self.coordinator.keep_awake = True
         self._start_task()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
+        self.coordinator.keep_awake = False
         self._cancel_task()
         self.async_write_ha_state()
 

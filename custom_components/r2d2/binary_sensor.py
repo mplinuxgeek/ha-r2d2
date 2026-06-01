@@ -47,4 +47,4 @@ class R2D2ConnectivitySensor(CoordinatorEntity[R2D2Coordinator], BinarySensorEnt
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return self.coordinator.is_connected

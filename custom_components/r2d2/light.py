@@ -123,6 +123,7 @@ class R2D2RGBLight(CoordinatorEntity[R2D2Coordinator], LightEntity, RestoreEntit
         self.coordinator.async_update_listeners()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_ensure_connected()
         state = self.coordinator.led_state[self._key]
         rgb = state["rgb"]
         effect = state["effect"]
@@ -143,6 +144,7 @@ class R2D2RGBLight(CoordinatorEntity[R2D2Coordinator], LightEntity, RestoreEntit
         self._update_state(True, rgb, effect)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_ensure_connected()
         await self._send_color(0, 0, 0)
         self._update_state(False, self.coordinator.led_state[self._key]["rgb"], None)
 
@@ -216,6 +218,7 @@ class R2D2BrightnessLight(CoordinatorEntity[R2D2Coordinator], LightEntity, Resto
         self.coordinator.async_update_listeners()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_ensure_connected()
         brightness = kwargs.get(
             ATTR_BRIGHTNESS, self.coordinator.led_state[self._key]["brightness"]
         )
@@ -223,6 +226,7 @@ class R2D2BrightnessLight(CoordinatorEntity[R2D2Coordinator], LightEntity, Resto
         self._update_state(True, brightness)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_ensure_connected()
         await self._send_brightness(0)
         self._update_state(False, self.coordinator.led_state[self._key]["brightness"])
 

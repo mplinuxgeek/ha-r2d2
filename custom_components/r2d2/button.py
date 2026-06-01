@@ -103,7 +103,8 @@ class R2D2Button(CoordinatorEntity[R2D2Coordinator], ButtonEntity):
         return True
 
     async def async_press(self) -> None:
-        """Handle the button press."""
+        """Connect if needed, then run the command."""
+        await self.coordinator.async_ensure_connected()
         await self.entity_description.press_fn(self.coordinator)
 
 

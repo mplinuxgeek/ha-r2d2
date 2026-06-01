@@ -62,6 +62,7 @@ class AnimationSelect(CoordinatorEntity[R2D2Coordinator], SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Play the selected animation."""
+        await self.coordinator.async_ensure_connected()
         await self.coordinator.droid.animate(option)
         self._current_option = option
         self.async_write_ha_state()
@@ -97,6 +98,7 @@ class AudioSelect(CoordinatorEntity[R2D2Coordinator], SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Play the selected audio clip."""
+        await self.coordinator.async_ensure_connected()
         await self.coordinator.droid.play_audio(option)
         self._current_option = option
         self.async_write_ha_state()

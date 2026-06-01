@@ -74,6 +74,7 @@ class DomeRotation(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEnti
         return self.coordinator.dome_angle
 
     async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_ensure_connected()
         speed = self.coordinator.dome_speed
         current = self.coordinator.dome_angle
         delta = value - current
@@ -174,6 +175,7 @@ class VolumeControl(CoordinatorEntity[R2D2Coordinator], NumberEntity):
         return self._current_value
 
     async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_ensure_connected()
         await self.coordinator.droid.set_volume(int(value * 255 / 100))
         self._current_value = value
         self.async_write_ha_state()
