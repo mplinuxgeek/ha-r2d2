@@ -100,8 +100,7 @@ class R2D2Button(CoordinatorEntity[R2D2Coordinator], ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the droid is connected."""
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     async def async_press(self) -> None:
         """Handle the button press."""

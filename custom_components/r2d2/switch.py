@@ -55,7 +55,7 @@ class R2D2AllLightsSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     @property
     def is_on(self) -> bool:

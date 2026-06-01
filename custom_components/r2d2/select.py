@@ -53,8 +53,7 @@ class AnimationSelect(CoordinatorEntity[R2D2Coordinator], SelectEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the droid is connected."""
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     @property
     def current_option(self) -> str | None:
@@ -89,8 +88,7 @@ class AudioSelect(CoordinatorEntity[R2D2Coordinator], SelectEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the droid is connected."""
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     @property
     def current_option(self) -> str | None:

@@ -103,7 +103,7 @@ class R2D2RGBLight(CoordinatorEntity[R2D2Coordinator], LightEntity, RestoreEntit
 
     @property
     def available(self) -> bool:
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     @property
     def is_on(self) -> bool:
@@ -200,7 +200,7 @@ class R2D2BrightnessLight(CoordinatorEntity[R2D2Coordinator], LightEntity, Resto
 
     @property
     def available(self) -> bool:
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     @property
     def is_on(self) -> bool:

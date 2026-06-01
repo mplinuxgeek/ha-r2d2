@@ -67,7 +67,7 @@ class DomeRotation(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEnti
 
     @property
     def available(self) -> bool:
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     @property
     def native_value(self) -> float:
@@ -167,7 +167,7 @@ class VolumeControl(CoordinatorEntity[R2D2Coordinator], NumberEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.droid is not None and self.coordinator.droid.connected
+        return True
 
     @property
     def native_value(self) -> float:
