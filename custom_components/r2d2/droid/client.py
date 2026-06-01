@@ -69,6 +69,8 @@ class DroidClient:
             disconnected_callback=self._on_disconnect,
         )
         _LOGGER.info("connect: established BLE connection to %s", self.address)
+        # Brief pause so the droid firmware is ready to accept the handshake.
+        await asyncio.sleep(0.5)
 
         services = self._client.services
         _LOGGER.debug("connect: discovered %d services on %s", len(list(services)), self.address)

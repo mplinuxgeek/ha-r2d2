@@ -110,13 +110,24 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Fire when the droid is seen advertising — reconnect if needed."""
         _LOGGER.debug(
-            "_on_ble_advertisement: address=%s rssi=%s change=%s connected=%s reconnecting=%s",
-            service_info.address, service_info.rssi, change, self.droid.connected, self._reconnecting,
+            "_on_ble_advertisement: address=%s rssi=%s connectable=%s change=%s connected=%s reconnecting=%s",
+            service_info.address, service_info.rssi, service_info.connectable,
+            change, self.droid.connected, self._reconnecting,
         )
         if not self.droid.connected and not self._reconnecting:
-            _LOGGER.info("_on_ble_advertisement: droid seen advertising, triggering auto-reconnect")
+            _LOGGER.info(
+                "_on_ble_advertisement: droid seen advertising (connectable=%s), triggering auto-reconnect",
+                service_info.connectable,
+            )
             self._reconnecting = True
-            self.hass.async_create_task(self._auto_reconnect(service_info.device))
+            # Only hand the BLEDevice directly to the reconnect if it is
+            # connectable — a non-connectable advertisement device cannot
+            # support GATT writes, so the handshake would silently fail.
+            # For non-connectable advertisements we let async_reconnect look
+            # the device up from HA's cache (which will have a connectable
+            # entry once the droid has been advertising long enough).
+            ble_device = service_info.device if service_info.connectable else None
+            self.hass.async_create_task(self._auto_reconnect(ble_device))
         else:
             _LOGGER.debug(
                 "_on_ble_advertisement: skipping (connected=%s reconnecting=%s)",
