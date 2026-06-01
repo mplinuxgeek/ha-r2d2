@@ -7,8 +7,9 @@ import time
 from datetime import timedelta
 from typing import Any
 
-_HEARTBEAT_TIMEOUT = 15   # seconds of sensor silence → phantom connection
-_WATCHDOG_INTERVAL = 15   # how often the watchdog fires
+_HEARTBEAT_TIMEOUT = 10   # seconds of sensor silence → phantom connection
+_WATCHDOG_INTERVAL = 10   # how often the watchdog fires
+_CONNECT_GRACE = 10       # seconds to wait for first packet after (re)connect/revive
 _SENSOR_PUSH_INTERVAL = 1.0  # min seconds between coordinator pushes from sensor stream
 
 from homeassistant.components.bluetooth import (
@@ -376,10 +377,10 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.droid.connected:
             return False
         if self._last_sensor_time is None:
-            # Still waiting for first packet after connect — give it 30s
+            # Still waiting for first packet after connect — give it the grace window
             if self._connected_at is None:
                 return False
-            return (time.monotonic() - self._connected_at) < 30
+            return (time.monotonic() - self._connected_at) < _CONNECT_GRACE
         return (time.monotonic() - self._last_sensor_time) < _HEARTBEAT_TIMEOUT
 
     async def async_ensure_connected(self) -> None:
@@ -388,11 +389,27 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         Called by all entity command methods so controls work whether the
         droid is on or off — if it's off, we connect first then run the command.
 
+        Three states:
+          * sensors flowing (is_connected) → nothing to do.
+          * BLE link up but sensor stream idle (droid idle-slept — it keeps the
+            link, stops streaming, and auto-wakes on the next command) → leave
+            the link up; the command's own ensure_awake re-inits then re-arms
+            the sensors, in order, on a now-awake droid.  Tearing the link down
+            here would re-arm sensors mid-wake, before the droid is ready, so
+            the stream never resumes.
+          * BLE fully down → full reconnect.
+
         Phantom handling (BLE up but sensor-silent) is decided inside
         async_reconnect under the lock, so concurrent commands can never race
         to tear down a connection one of them just rebuilt.
         """
         if self.is_connected:
+            return
+        if self.droid.connected:
+            _LOGGER.debug(
+                "async_ensure_connected: link up but sensors idle — "
+                "waking in place (command's ensure_awake re-arms sensors)"
+            )
             return
         _LOGGER.debug("async_ensure_connected: not connected, attempting connect")
         await self.async_reconnect()

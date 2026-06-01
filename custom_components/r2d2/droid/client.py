@@ -33,7 +33,8 @@ class DroidClient:
         await client.disconnect()
     """
 
-    IDLE_SLEEP_TIMEOUT = 600  # seconds before assuming droid needs re-init
+    IDLE_SLEEP_TIMEOUT = 290  # seconds idle before droid sleeps (sensor stream
+                              # stops ~5 min) → next command must re-init + re-arm sensors
 
     def __init__(self, address: str) -> None:
         self.address = address
@@ -42,6 +43,7 @@ class DroidClient:
         self._asleep = False
         self._intentional_disconnect = False
         self._last_command_time: float | None = None
+        self._waking = False          # guard: re-entrancy in ensure_awake
         self._seq = 0
         self._packet_buffer: list[int] = []
         self.sensor_callback = None   # callable(dict) — receives live sensor data
@@ -126,15 +128,27 @@ class DroidClient:
         return self._client is not None and self._client.is_connected
 
     async def ensure_awake(self) -> None:
-        if self._last_command_time is not None:
-            loop = asyncio.get_running_loop()
-            idle = loop.time() - self._last_command_time
-            _LOGGER.debug("ensure_awake: idle=%.1fs (threshold=%ds)", idle, self.IDLE_SLEEP_TIMEOUT)
-            if idle > self.IDLE_SLEEP_TIMEOUT:
-                _LOGGER.info("ensure_awake: idle %.0fs > threshold, sending init", idle)
-                await self.init()
-        else:
-            _LOGGER.debug("ensure_awake: no prior command time, skipping")
+        # _waking guards re-entrancy: init() and enable_all_sensors() below each
+        # go through _send → ensure_awake, which would otherwise recurse forever
+        # (the idle window is still stale until the first write completes).
+        if self._waking or self._last_command_time is None:
+            return
+        loop = asyncio.get_running_loop()
+        idle = loop.time() - self._last_command_time
+        _LOGGER.debug("ensure_awake: idle=%.1fs (threshold=%ds)", idle, self.IDLE_SLEEP_TIMEOUT)
+        if idle <= self.IDLE_SLEEP_TIMEOUT:
+            return
+        # Droid has likely slept: it stops the sensor stream on idle-sleep but
+        # keeps BLE up and auto-wakes on the next command.  Re-init AND re-arm
+        # the sensors so live data resumes — the command itself wakes the motors
+        # but never restarts streaming.
+        _LOGGER.info("ensure_awake: idle %.0fs > threshold, re-init + re-arm sensors", idle)
+        self._waking = True
+        try:
+            await self.init()
+            await self.enable_all_sensors()
+        finally:
+            self._waking = False
 
     async def _send(self, msg, payload=None, label=""):
         cmd = label or msg.hex()
