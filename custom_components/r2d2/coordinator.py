@@ -140,6 +140,24 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
 
             # droid.connected is True but is_connected is False → sensor silence.
+            if not self.keep_awake:
+                # Keep-awake off: don't fight the droid's idle-sleep.  Sensor
+                # silence means it has slept (or powered off) — disconnect our
+                # end so the socket is clean and the droid can rest.  A control
+                # activation reconnects and wakes it on demand.
+                _LOGGER.info(
+                    "_heartbeat_watchdog: sensor silence and keep_awake off — "
+                    "letting droid sleep, disconnecting"
+                )
+                try:
+                    await self.droid.disconnect()
+                except Exception as exc:
+                    _LOGGER.debug("_heartbeat_watchdog: disconnect error: %s", exc)
+                self._phantom_revive_attempted = False
+                self.async_update_listeners()
+                continue
+
+            # keep_awake on → try to revive the stream to hold the droid awake.
             if not self._phantom_revive_attempted:
                 self._phantom_revive_attempted = True
                 try:
@@ -203,6 +221,15 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             change, self.droid.connected, self._reconnecting,
         )
         if not self.droid.connected and not self._reconnecting:
+            if not self.keep_awake:
+                # Keep-awake off: a background advertisement must not wake a
+                # resting droid (reconnect's init would).  Reconnect happens
+                # on control activation instead — see async_ensure_connected.
+                _LOGGER.debug(
+                    "_on_ble_advertisement: keep_awake off — not auto-reconnecting "
+                    "(droid left to sleep; control activation will reconnect)"
+                )
+                return
             _LOGGER.info(
                 "_on_ble_advertisement: droid seen advertising (connectable=%s), triggering auto-reconnect",
                 service_info.connectable,
