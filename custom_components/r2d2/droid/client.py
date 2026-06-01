@@ -3,6 +3,7 @@ import logging
 import struct
 
 from bleak import BleakClient
+from bleak_retry_connector import establish_connection
 
 from .constants import (
     CONNECT_CHAR, HANDLE_CHAR, MAIN_CHAR, BATTERY_CHAR,
@@ -60,10 +61,12 @@ class DroidClient:
         self._intentional_disconnect = False
         self._seq = 0
         self._packet_buffer.clear()
-        self._client = BleakClient(ble_device, disconnected_callback=self._on_disconnect)
-        await self._client.connect()
-        if not self._client.is_connected:
-            raise RuntimeError(f"Failed to connect to {self.address}")
+        self._client = await establish_connection(
+            BleakClient,
+            ble_device,
+            self.address,
+            disconnected_callback=self._on_disconnect,
+        )
         _LOGGER.info("Connected to %s", self.address)
 
         services = self._client.services
