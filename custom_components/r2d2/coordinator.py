@@ -15,6 +15,8 @@ _VERIFY_DELAY = 2.0       # seconds between post-connect sensor-stream re-enable
 _VERIFY_ATTEMPTS = 3      # how many times to re-enable sensors if the stream doesn't start
 _WAKE_SETTLE = 2.0        # seconds to let a just-woken droid's motor controller come
                           # online before the first command (else stance/move is dropped)
+_DRIVE_RESEND = 0.3       # seconds between re-asserting the latest drive vector while active
+_DRIVE_TIMEOUT = 1.5      # dead-man: auto-stop if no new drive command arrives within this
 
 from homeassistant.components.bluetooth import (
     BluetoothChange,
@@ -81,6 +83,9 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.keep_awake: bool = False  # set by R2D2KeepAwakeSwitch
         self._watchdog_task: asyncio.Task | None = None
         self._verify_task: asyncio.Task | None = None  # post-connect sensor-stream kick
+        self._drive_target: tuple[int, int, int] | None = None  # (speed, heading, flags)
+        self._drive_last: float = 0.0                  # monotonic time of last drive command
+        self._drive_task: asyncio.Task | None = None   # background drive re-assert / dead-man
         # Shared LED state — all light/switch entities read and write here so
         # they stay in sync without knowing about each other.
         self.led_state: dict[str, Any] = {
@@ -471,6 +476,50 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("async_ensure_connected: settling %.1fs after wake-reconnect", _WAKE_SETTLE)
         await asyncio.sleep(_WAKE_SETTLE)
 
+    async def async_drive(self, speed: int, heading: int = 0, flags: int = 0) -> None:
+        """Set the drive vector. Throttled + dead-man-guarded via a background loop.
+
+        Callers (e.g. a joystick card firing many times/second) just update the
+        target here; the loop re-asserts it to the droid at a fixed rate and
+        auto-stops if commands stop arriving — so a closed dashboard or dropped
+        connection can't leave the droid rolling.
+        """
+        self._drive_target = (int(speed), int(heading) % 360, int(flags))
+        self._drive_last = time.monotonic()
+        if self._drive_task is None or self._drive_task.done():
+            self._drive_task = self.hass.async_create_task(self._drive_loop())
+
+    async def _drive_loop(self) -> None:
+        """Re-assert the latest drive vector at a fixed rate until it goes stale."""
+        try:
+            await self.async_ensure_connected()  # wake + settle on first drive
+            while (
+                self._drive_target is not None
+                and (time.monotonic() - self._drive_last) <= _DRIVE_TIMEOUT
+            ):
+                speed, heading, flags = self._drive_target
+                await self.droid.drive(speed, heading, flags)
+                await asyncio.sleep(_DRIVE_RESEND)
+        except Exception as exc:
+            _LOGGER.warning("_drive_loop: error: %s", exc)
+        finally:
+            # Loop ended (dead-man, explicit stop, or error) → halt the droid.
+            self._drive_target = None
+            if self.droid.connected:
+                try:
+                    await self.droid.stop()
+                except Exception as exc:
+                    _LOGGER.debug("_drive_loop: stop on exit failed: %s", exc)
+
+    async def async_stop_drive(self) -> None:
+        """Stop driving now. The loop also halts on its next tick (dup stop is harmless)."""
+        self._drive_target = None
+        if self.droid.connected:
+            try:
+                await self.droid.stop()
+            except Exception as exc:
+                _LOGGER.debug("async_stop_drive: %s", exc)
+
     async def _reconnect_for_send(self) -> None:
         """Reconnect hook handed to the DroidClient for auto-wake on send.
 
@@ -533,6 +582,12 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._verify_task and not self._verify_task.done():
             self._verify_task.cancel()
         self._verify_task = None
+
+        # Stop any active drive loop
+        self._drive_target = None
+        if self._drive_task and not self._drive_task.done():
+            self._drive_task.cancel()
+        self._drive_task = None
 
         if self._cancel_bt_callback:
             self._cancel_bt_callback()

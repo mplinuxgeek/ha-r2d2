@@ -1,0 +1,55 @@
+drive:
+  name: Drive
+  description: >-
+    Drive the droid at a speed and heading. Repeat the call to keep it moving
+    or to change course; it auto-stops if no further drive call arrives within
+    ~1.5s (so a closed dashboard or dropped connection can't leave it rolling).
+    Wire this to a joystick card: map the stick to speed/heading on drag and
+    call r2d2.stop on release.
+  target:
+    device:
+      integration: r2d2
+  fields:
+    speed:
+      name: Speed
+      description: Drive speed, 0 (stop) to 255 (full).
+      required: true
+      example: 120
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: slider
+    heading:
+      name: Heading
+      description: >-
+        Direction in degrees (0–359), relative to the droid's current forward
+        (use the Reset Yaw button to set "forward").
+      required: false
+      default: 0
+      example: 90
+      selector:
+        number:
+          min: 0
+          max: 359
+          unit_of_measurement: "°"
+          mode: slider
+    direction:
+      name: Direction
+      description: Drive direction / modifier.
+      required: false
+      default: forward
+      selector:
+        select:
+          options:
+            - forward
+            - backward
+            - turbo
+            - fast_turn
+
+stop:
+  name: Stop
+  description: Immediately stop the droid's drive motors.
+  target:
+    device:
+      integration: r2d2
