@@ -11,6 +11,8 @@ _HEARTBEAT_TIMEOUT = 10   # seconds of sensor silence → phantom connection
 _WATCHDOG_INTERVAL = 10   # how often the watchdog fires
 _CONNECT_GRACE = 10       # seconds to wait for first packet after (re)connect/revive
 _SENSOR_PUSH_INTERVAL = 1.0  # min seconds between coordinator pushes from sensor stream
+_VERIFY_DELAY = 2.0       # seconds between post-connect sensor-stream re-enable kicks
+_VERIFY_ATTEMPTS = 3      # how many times to re-enable sensors if the stream doesn't start
 
 from homeassistant.components.bluetooth import (
     BluetoothChange,
@@ -76,6 +78,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         self.keep_awake: bool = False  # set by R2D2KeepAwakeSwitch
         self._watchdog_task: asyncio.Task | None = None
+        self._verify_task: asyncio.Task | None = None  # post-connect sensor-stream kick
         # Shared LED state — all light/switch entities read and write here so
         # they stay in sync without knowing about each other.
         self.led_state: dict[str, Any] = {
@@ -207,6 +210,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_sensor_time = None
         _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
         self._reset_led_state()
+        self._start_sensor_verify()
 
     @callback
     def _on_ble_advertisement(
@@ -259,6 +263,44 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             self._reconnecting = False
             _LOGGER.debug("_auto_reconnect: done, reconnecting flag cleared")
+
+    def _start_sensor_verify(self) -> None:
+        """(Re)start the post-connect sensor-stream supervisor.
+
+        A droid freshly woken from sleep acks the sensor-enable commands but
+        often does not actually begin streaming — its streaming engine isn't
+        running yet at the moment we configure it during the wake handshake.
+        This re-enables sensors a few times shortly after connect until packets
+        arrive.  Runs as a background task so the wake command (e.g. an
+        animation) still fires instantly.
+        """
+        if self._verify_task and not self._verify_task.done():
+            self._verify_task.cancel()
+        self._verify_task = self.hass.async_create_task(self._verify_sensor_stream())
+
+    async def _verify_sensor_stream(self) -> None:
+        """Re-enable sensors until the stream starts, or give up after a few tries."""
+        for attempt in range(1, _VERIFY_ATTEMPTS + 1):
+            await asyncio.sleep(_VERIFY_DELAY)
+            if self._last_sensor_time is not None:
+                _LOGGER.debug("_verify_sensor_stream: stream live, nothing to do")
+                return
+            if not self.droid.connected:
+                _LOGGER.debug("_verify_sensor_stream: no longer connected, stopping")
+                return
+            _LOGGER.info(
+                "_verify_sensor_stream: no sensor data %.0fs after connect — "
+                "re-enabling sensors (attempt %d/%d)",
+                attempt * _VERIFY_DELAY, attempt, _VERIFY_ATTEMPTS,
+            )
+            try:
+                await self.droid.enable_all_sensors()
+                # Push the grace window out so the watchdog doesn't tear the
+                # link down while we are still trying to start the stream.
+                self._connected_at = time.monotonic()
+            except Exception as exc:
+                _LOGGER.debug("_verify_sensor_stream: re-enable failed: %s", exc)
+                return
 
     def _reset_led_state(self) -> None:
         """Mark all LEDs as off after every connect.
@@ -376,6 +418,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._connected_at = time.monotonic()
                     self._last_sensor_time = None
                     self._reset_led_state()
+                    self._start_sensor_verify()
                     _LOGGER.info("async_reconnect: droid %s reconnected (attempt %d)", self.address, attempt)
                     self.hass.async_create_task(self.async_refresh())
                     return
@@ -500,6 +543,11 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._watchdog_task and not self._watchdog_task.done():
             self._watchdog_task.cancel()
         self._watchdog_task = None
+
+        # Cancel post-connect sensor-stream supervisor
+        if self._verify_task and not self._verify_task.done():
+            self._verify_task.cancel()
+        self._verify_task = None
 
         if self._cancel_bt_callback:
             self._cancel_bt_callback()
