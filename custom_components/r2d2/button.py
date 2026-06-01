@@ -131,5 +131,5 @@ class R2D2ReconnectButton(CoordinatorEntity[R2D2Coordinator], ButtonEntity):
 
     async def async_press(self) -> None:
         """Reconnect to the droid and confirm with a whisper."""
-        await self.coordinator.async_reconnect()
+        await self.coordinator.async_reconnect(force=True)
         await self.coordinator.droid.animate("wwm_whisper")

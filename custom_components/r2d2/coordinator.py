@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -63,6 +64,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
         self._reconnect_lock = asyncio.Lock()
+        self._last_sensor_time: float | None = None   # heartbeat timestamp
         self.dome_angle: float = 0.0   # last commanded angle
         self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         # Shared LED state — all light/switch entities read and write here so
@@ -158,6 +160,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _on_sensor_data(self, data: dict) -> None:
         """Handle live sensor push from droid. Called in the HA event loop on Linux."""
+        self._last_sensor_time = time.monotonic()
         _LOGGER.debug("Sensor data received: %s", data)
         flat: dict[str, Any] = {}
 
@@ -185,20 +188,27 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sensor_data.update(flat)
         self.async_set_updated_data({**(self.data or {}), **flat})
 
-    async def async_reconnect(self, ble_device=None) -> None:
+    async def async_reconnect(self, ble_device=None, force: bool = False) -> None:
         """Re-establish BLE connection after the droid wakes from sleep.
 
         Serialised by _reconnect_lock — concurrent callers never race and
         the second caller returns immediately once the first has connected.
         The lock is held only during the actual connection attempt so it
         never blocks other callers for more than a few seconds.
+
+        force=True skips the "already connected" early-return and always
+        disconnects then reconnects.  Use this for the explicit Reconnect
+        button to break a phantom BLE connection held open by a BT proxy.
         """
-        _LOGGER.debug("async_reconnect: waiting for lock (ble_device=%s)", ble_device)
+        _LOGGER.debug("async_reconnect: waiting for lock (ble_device=%s force=%s)", ble_device, force)
         async with self._reconnect_lock:
             _LOGGER.debug("async_reconnect: lock acquired, droid.connected=%s", self.droid.connected)
-            if self.droid.connected:
+            if self.droid.connected and not force:
                 _LOGGER.debug("async_reconnect: already connected, returning")
                 return
+            if self.droid.connected:
+                _LOGGER.debug("async_reconnect: force=True — disconnecting phantom connection")
+                await self.droid.disconnect()
 
             device = ble_device
             if device is None:
@@ -226,6 +236,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.droid.sensor_callback = self._on_sensor_data
                     await self.droid.enable_all_sensors()
                     self.sensor_data.clear()
+                    self._last_sensor_time = None   # reset so heartbeat gives it time to arrive
                     self._reset_led_state()
                     _LOGGER.info("async_reconnect: droid %s reconnected (attempt %d)", self.address, attempt)
                     self.hass.async_create_task(self.async_refresh())
@@ -243,11 +254,26 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Failed to reconnect to {self.address} after 3 attempts: {last_exc}"
             )
 
+    _HEARTBEAT_TIMEOUT = 15  # seconds of sensor silence before declaring dead
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll battery and RSSI every update interval."""
         _LOGGER.debug("_async_update_data: polling (connected=%s)", self.droid.connected)
         if not self.droid.connected:
             raise UpdateFailed("Droid is not connected")
+
+        # Heartbeat check — sensor data should arrive every ~150ms.
+        # If it has been silent for too long the BLE connection is a phantom.
+        if self._last_sensor_time is not None:
+            silence = time.monotonic() - self._last_sensor_time
+            _LOGGER.debug("_async_update_data: sensor heartbeat silence=%.1fs", silence)
+            if silence > self._HEARTBEAT_TIMEOUT:
+                _LOGGER.warning(
+                    "No sensor data for %.0fs — phantom connection detected, forcing reconnect",
+                    silence,
+                )
+                self.hass.async_create_task(self.async_reconnect(force=True))
+                raise UpdateFailed("Phantom connection — reconnecting")
 
         battery = await self.droid.battery()
         current = dict(self.data or {})
