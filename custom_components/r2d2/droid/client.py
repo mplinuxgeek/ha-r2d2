@@ -45,6 +45,7 @@ class DroidClient:
         self._intentional_disconnect = False
         self._last_command_time: float | None = None
         self._waking = False          # guard: re-entrancy in ensure_awake
+        self._stance: str | None = None  # last commanded leg stance (tripod/bipod/waddle)
         self._seq = 0
         self._packet_buffer: list[int] = []
         self.sensor_callback = None   # callable(dict) — receives live sensor data
@@ -60,6 +61,7 @@ class DroidClient:
         self._main_char = None
         self._last_command_time = None  # prevents ensure_awake recursion
         self._intentional_disconnect = False
+        self._stance = None             # stance unknown after a fresh connect
         self._seq = 0
         self._packet_buffer.clear()
 
@@ -125,6 +127,11 @@ class DroidClient:
     @property
     def connected(self) -> bool:
         return self._client is not None and self._client.is_connected
+
+    @property
+    def stance(self) -> str | None:
+        """Last commanded leg stance: 'tripod', 'bipod', 'waddle', or None if unknown."""
+        return self._stance
 
     async def ensure_awake(self) -> None:
         # _waking guards re-entrancy: init() and enable_all_sensors() below each
@@ -295,14 +302,21 @@ class DroidClient:
         return await self._send(MSG_ROTATE, degrees_to_bytes(degrees), label=f"rotate({degrees})")
 
     async def tripod(self):
-        return await self._send(MSG_CARRIAGE, [LegAction.TRIPOD], label="tripod")
+        result = await self._send(MSG_CARRIAGE, [LegAction.TRIPOD], label="tripod")
+        self._stance = "tripod"
+        return result
 
     async def bipod(self):
-        return await self._send(MSG_CARRIAGE, [LegAction.BIPOD], label="bipod")
+        result = await self._send(MSG_CARRIAGE, [LegAction.BIPOD], label="bipod")
+        self._stance = "bipod"
+        return result
 
     async def waddle(self, enable=True):
         action = LegAction.WADDLE if enable else LegAction.STOP
-        return await self._send(MSG_CARRIAGE, [action], label=f"waddle({enable})")
+        result = await self._send(MSG_CARRIAGE, [action], label=f"waddle({enable})")
+        # Waddle leaves the legs in the waddle config; stopping it is ambiguous.
+        self._stance = "waddle" if enable else None
+        return result
 
     async def drive(self, speed, heading=0, flags=DriveFlags.FORWARD):
         heading = int(heading) % 360

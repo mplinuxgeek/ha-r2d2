@@ -17,6 +17,7 @@ _WAKE_SETTLE = 2.0        # seconds to let a just-woken droid's motor controller
                           # online before the first command (else stance/move is dropped)
 _DRIVE_RESEND = 0.3       # seconds between re-asserting the latest drive vector while active
 _DRIVE_TIMEOUT = 1.5      # dead-man: auto-stop if no new drive command arrives within this
+_STANCE_SETTLE = 2.0      # seconds for the legs to reach tripod before drive commands land
 
 from homeassistant.components.bluetooth import (
     BluetoothChange,
@@ -493,13 +494,22 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Re-assert the latest drive vector at a fixed rate until it goes stale."""
         try:
             await self.async_ensure_connected()  # wake + settle on first drive
-            # Driving needs the control system (stabilization) on, else the droid
-            # accepts the roll command (and assumes tripod) but the motors never
-            # engage.  Enable it once at the start of the drive session.
+            # Driving needs tripod (rolling) stance AND the control system on.
+            # A roll command sent while the legs are still transitioning to
+            # tripod is acked but dropped, so switch stance and let it settle
+            # first.  Skip the settle when already in tripod (consecutive drives
+            # stay instant); enabling stabilization is cheap, do it every time.
             try:
+                if self.droid.stance != "tripod":
+                    await self.droid.tripod()
+                    await asyncio.sleep(_STANCE_SETTLE)
                 await self.droid.set_stabilization(1)
             except Exception as exc:
-                _LOGGER.debug("_drive_loop: enable stabilization failed: %s", exc)
+                _LOGGER.debug("_drive_loop: drive prep failed: %s", exc)
+            # Prep (connect/stance settle) can outlast the dead-man window; start
+            # its clock now so prep time isn't mistaken for the controller going
+            # away and stopping us before we ever roll.
+            self._drive_last = time.monotonic()
             while (
                 self._drive_target is not None
                 and (time.monotonic() - self._drive_last) <= _DRIVE_TIMEOUT
