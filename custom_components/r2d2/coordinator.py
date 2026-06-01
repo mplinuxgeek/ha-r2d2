@@ -24,8 +24,8 @@ from homeassistant.components.bluetooth import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     DOMAIN,
@@ -109,25 +109,25 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _initial_connect(self) -> None:
         """Attempt connect at startup; swallow errors — BLE callback will retry."""
         try:
-            await self.async_connect()
+            await self.async_reconnect()
         except Exception as exc:
             _LOGGER.info(
                 "async_setup: initial connect failed (%s) — will retry on advertisement", exc
             )
 
     async def _heartbeat_watchdog(self) -> None:
-        """Runs every 15s; recovers stalled sensor streams and disconnects phantoms.
+        """Fires every _WATCHDOG_INTERVAL; reacts to sensor silence on a live link.
 
-        Sensor silence on a BLE-connected client has two causes:
-          * a phantom — droid powered off but the OS socket is held open
-            (common behind a BT proxy); or
-          * a live droid whose sensor stream merely stalled.
-
-        We first try to revive the stream by re-enabling sensors.  Only if that
-        write fails (link truly dead) or the stream stays silent through the
-        next grace window do we tear the link down — this avoids loop-killing a
-        healthy connection that briefly stopped streaming.  Disconnecting purges
-        the OS socket so the next advertisement triggers a clean reconnect.
+        Sensor silence while the BLE socket is still open means either the
+        droid has idle-slept (or powered off, leaving a phantom socket held by
+        a BT proxy) or a live droid's stream briefly stalled.  Response depends
+        on the keep_awake preference:
+          * keep_awake off → let the droid rest: disconnect our end cleanly so
+            the next control activation reconnects and wakes it.
+          * keep_awake on  → try once to revive the stream by re-enabling
+            sensors; if it stays silent through the next grace window, treat it
+            as a phantom and disconnect so the next advertisement reconnects.
+        Disconnecting always purges the OS socket for a clean reconnect.
         """
         while True:
             await asyncio.sleep(_WATCHDOG_INTERVAL)
@@ -190,27 +190,6 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("_heartbeat_watchdog: disconnect error: %s", exc)
             self._phantom_revive_attempted = False
             self.async_update_listeners()
-
-    async def async_connect(self) -> None:
-        """Connect to the droid, run handshake, enable sensors."""
-        ble_device = async_ble_device_from_address(self.hass, self.address, connectable=True)
-        if ble_device is None:
-            raise ConfigEntryNotReady(
-                f"Bluetooth device {self.address} not found. "
-                "Ensure the droid is powered on and in range."
-            )
-
-        await self.droid.connect(ble_device)
-        _LOGGER.debug("Connected to %s, sending init", self.address)
-        await self.droid.init()
-        self.droid.sensor_callback = self._on_sensor_data
-        _LOGGER.debug("Enabling sensor streams on %s", self.address)
-        await self.droid.enable_all_sensors()
-        self._connected_at = time.monotonic()
-        self._last_sensor_time = None
-        _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
-        self._reset_led_state()
-        self._start_sensor_verify()
 
     @callback
     def _on_ble_advertisement(
@@ -506,9 +485,8 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         current = dict(self.data or {})
 
         if not self.droid.connected:
-            # Not connected — notify listeners so binary sensor updates,
-            # but don't raise UpdateFailed so the coordinator keeps polling.
-            self.async_update_listeners()
+            # Not connected — return current data without raising so the
+            # coordinator keeps polling; it pushes to listeners on return.
             return current
 
         # Log heartbeat state for diagnostics.
@@ -520,7 +498,6 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif self._connected_at is not None:
             _LOGGER.debug("_async_update_data: waiting for first sensor packet (%.1fs since connect)",
                           now - self._connected_at)
-        self.async_update_listeners()
 
         battery = await self.droid.battery()
         if battery is not None:

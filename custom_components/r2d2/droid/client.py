@@ -40,7 +40,6 @@ class DroidClient:
         self.address = address
         self._client: BleakClient | None = None
         self._main_char = None
-        self._asleep = False
         self._intentional_disconnect = False
         self._last_command_time: float | None = None
         self._waking = False          # guard: re-entrancy in ensure_awake
@@ -58,7 +57,6 @@ class DroidClient:
         _LOGGER.debug("connect: resetting session state for %s", self.address)
         self._main_char = None
         self._last_command_time = None  # prevents ensure_awake recursion
-        self._asleep = False
         self._intentional_disconnect = False
         self._seq = 0
         self._packet_buffer.clear()
@@ -117,7 +115,6 @@ class DroidClient:
 
     def _on_disconnect(self, client) -> None:
         if not self._intentional_disconnect:
-            self._asleep = True
             _LOGGER.info("_on_disconnect: %s dropped connection (sleep/power-off)", self.address)
         else:
             _LOGGER.debug("_on_disconnect: intentional disconnect from %s", self.address)
