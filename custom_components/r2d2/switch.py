@@ -160,7 +160,7 @@ class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, Rest
             delay = random.uniform(self._MIN_INTERVAL, self._MAX_INTERVAL)
             _LOGGER.debug("Keep-awake: next idle animation in %.0fs", delay)
             await asyncio.sleep(delay)
-            if not self.coordinator.droid.connected:
+            if not self.coordinator.is_connected:
                 _LOGGER.debug("Keep-awake: droid not connected, skipping")
                 continue
             anim = random.choice(self._IDLE_ANIMATIONS)

@@ -5,7 +5,6 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import R2D2Coordinator
@@ -14,20 +13,19 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up R2D2 from a config entry."""
+    """Set up R2D2 from a config entry.
+
+    Always succeeds — entities load as unavailable if the droid is off at boot.
+    The BLE advertisement callback handles auto-reconnect when it powers on.
+    """
     coordinator = R2D2Coordinator(hass, entry)
-
-    try:
-        await coordinator.async_connect()
-    except ConfigEntryNotReady:
-        raise
-    except Exception as exc:
-        raise ConfigEntryNotReady(f"Failed to connect to droid: {exc}") from exc
-
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Register BLE watcher and attempt background initial connect.
+    # Does not raise — integration loads even when droid is off.
+    await coordinator.async_setup()
 
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 

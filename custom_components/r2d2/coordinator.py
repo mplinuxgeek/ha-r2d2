@@ -7,6 +7,9 @@ import time
 from datetime import timedelta
 from typing import Any
 
+_HEARTBEAT_TIMEOUT = 15   # seconds of sensor silence → phantom connection
+_WATCHDOG_INTERVAL = 15   # how often the watchdog fires
+
 from homeassistant.components.bluetooth import (
     BluetoothChange,
     BluetoothScanningMode,
@@ -69,6 +72,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.dome_angle: float = 0.0   # last commanded angle
         self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         self.keep_awake: bool = False  # set by R2D2KeepAwakeSwitch
+        self._watchdog_task: asyncio.Task | None = None
         # Shared LED state — all light/switch entities read and write here so
         # they stay in sync without knowing about each other.
         self.led_state: dict[str, Any] = {
@@ -77,6 +81,54 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             "holo_projector": {"on": False, "brightness": 255},
             "logic_display":  {"on": False, "brightness": 255},
         }
+
+    async def async_setup(self) -> None:
+        """Register BLE advertisement watcher and attempt initial connect in background.
+
+        Always succeeds — entities load as unavailable if the droid is off.
+        """
+        if self._cancel_bt_callback is None:
+            # Register unconditionally so we catch advertisements even when droid is off.
+            self._cancel_bt_callback = async_register_callback(
+                self.hass,
+                self._on_ble_advertisement,
+                {"address": self.address},
+                BluetoothScanningMode.ACTIVE,
+            )
+        # Start phantom-breaker watchdog
+        self._watchdog_task = self.hass.async_create_task(self._heartbeat_watchdog())
+        # Non-blocking initial connect — failure is normal if droid is off at boot
+        self.hass.async_create_task(self._initial_connect())
+
+    async def _initial_connect(self) -> None:
+        """Attempt connect at startup; swallow errors — BLE callback will retry."""
+        try:
+            await self.async_connect()
+        except Exception as exc:
+            _LOGGER.info(
+                "async_setup: initial connect failed (%s) — will retry on advertisement", exc
+            )
+
+    async def _heartbeat_watchdog(self) -> None:
+        """Runs every 15s; disconnects phantom BLE connections.
+
+        A phantom is when Bleak reports connected but sensor data has gone
+        silent (droid powered off).  Disconnecting purges the OS socket so the
+        next advertisement triggers a clean reconnect.
+        """
+        while True:
+            await asyncio.sleep(_WATCHDOG_INTERVAL)
+            if self.droid.connected and not self.is_connected:
+                _LOGGER.info(
+                    "_heartbeat_watchdog: sensor silence > %ds on connected client — "
+                    "phantom connection, disconnecting to allow clean reconnect",
+                    _HEARTBEAT_TIMEOUT,
+                )
+                try:
+                    await self.droid.disconnect()
+                except Exception as exc:
+                    _LOGGER.debug("_heartbeat_watchdog: disconnect error: %s", exc)
+                self.async_update_listeners()
 
     async def async_connect(self) -> None:
         """Connect to the droid, run handshake, enable sensors."""
@@ -97,16 +149,6 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_sensor_time = None
         _LOGGER.info("R2D2 droid %s connected and initialised", self.address)
         self._reset_led_state()
-
-        if self._cancel_bt_callback is None:
-            # No connectable filter — the droid may advertise as non-connectable
-            # when first waking, so we need to catch all advertisements.
-            self._cancel_bt_callback = async_register_callback(
-                self.hass,
-                self._on_ble_advertisement,
-                {"address": self.address},
-                BluetoothScanningMode.ACTIVE,
-            )
 
     @callback
     def _on_ble_advertisement(
@@ -259,8 +301,6 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Failed to reconnect to {self.address} after 3 attempts: {last_exc}"
             )
 
-    _HEARTBEAT_TIMEOUT = 15  # seconds of sensor silence → droid considered offline
-
     @property
     def is_connected(self) -> bool:
         """True when BLE is up AND sensor data has arrived recently.
@@ -277,21 +317,28 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._connected_at is None:
                 return False
             return (time.monotonic() - self._connected_at) < 30
-        return (time.monotonic() - self._last_sensor_time) < self._HEARTBEAT_TIMEOUT
+        return (time.monotonic() - self._last_sensor_time) < _HEARTBEAT_TIMEOUT
 
     async def async_ensure_connected(self) -> None:
         """Connect to the droid if not already connected.
 
         Called by all entity command methods so controls work whether the
         droid is on or off — if it's off, we connect first then run the command.
+
+        If BLE shows connected but sensor data is silent (phantom), we force-
+        disconnect before reconnecting so the OS socket is cleanly purged.
         """
         if self.is_connected:
             return
-        _LOGGER.debug("async_ensure_connected: not connected, attempting connect")
-        await self.async_reconnect()
+        # Phantom: BLE connected but sensor-silent → force-disconnect first
+        force = self.droid.connected
+        _LOGGER.debug(
+            "async_ensure_connected: not connected (phantom=%s), attempting connect", force
+        )
+        await self.async_reconnect(force=force)
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Poll battery and RSSI; heartbeat drives the binary sensor only."""
+        """Poll battery and RSSI every 30s; binary sensor driven by is_connected."""
         _LOGGER.debug("_async_update_data: polling (connected=%s is_connected=%s)",
                       self.droid.connected, self.is_connected)
 
@@ -303,8 +350,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_update_listeners()
             return current
 
-        # Heartbeat: update listeners so binary sensor reflects sensor silence.
-        # No forced reconnects — that's the user's call (reconnect button / automation).
+        # Log heartbeat state for diagnostics.
         now = time.monotonic()
         if self._last_sensor_time is not None:
             silence = now - self._last_sensor_time
@@ -327,26 +373,26 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.debug("_async_update_data: no service_info for RSSI")
 
-        battery = await self.droid.battery()
-        current = dict(self.data or {})
-        if battery is not None:
-            current["battery"] = battery
-            _LOGGER.debug("_async_update_data: battery=%d%%", battery)
-
-        service_info = async_last_service_info(self.hass, self.address, connectable=True)
-        if service_info is not None:
-            current[ATTR_RSSI] = service_info.rssi
-            _LOGGER.debug("_async_update_data: rssi=%d dBm", service_info.rssi)
-        else:
-            _LOGGER.debug("_async_update_data: no service_info for RSSI")
-
         current.update(self.sensor_data)
         return current
 
     async def async_disconnect(self) -> None:
-        """Disconnect from the droid and cancel the BLE advertisement watcher."""
+        """Unload: cancel watchdog, unregister BLE callback, sleep droid, disconnect."""
+        # Cancel phantom-breaker watchdog
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+        self._watchdog_task = None
+
         if self._cancel_bt_callback:
             self._cancel_bt_callback()
             self._cancel_bt_callback = None
+
+        if self.droid.connected:
+            try:
+                _LOGGER.debug("async_disconnect: sending sleep command before BLE teardown")
+                await self.droid.off()
+            except Exception as exc:
+                _LOGGER.debug("async_disconnect: sleep command failed: %s", exc)
+
         await self.droid.disconnect()
         _LOGGER.info("R2D2 droid %s disconnected", self.address)
