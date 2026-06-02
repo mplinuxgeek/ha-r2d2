@@ -7,13 +7,12 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import DEGREE, PERCENTAGE, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import R2D2Coordinator
+from .entity import R2D2Entity
 
 _STEP_DEGREES = 5.0  # degrees per interpolation step
 
@@ -31,14 +30,13 @@ async def async_setup_entry(
     ])
 
 
-class DomeRotation(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEntity):
+class DomeRotation(R2D2Entity, NumberEntity, RestoreEntity):
     """Dome rotation angle (−160 to +180 °).
 
     When dome_speed < 10 the move is interpolated in _STEP_DEGREES increments
     so the dome pans visibly rather than snapping to the target.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "dome_rotation"
     _attr_native_min_value = -160.0
     _attr_native_max_value = 180.0
@@ -47,14 +45,8 @@ class DomeRotation(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEnti
     _attr_mode = NumberMode.SLIDER
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_dome_rotation"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.address)},
-            name=coordinator.droid_name,
-            manufacturer="Sphero",
-            model="R2-D2 / Q5",
-        )
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -64,10 +56,6 @@ class DomeRotation(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEnti
                 self.coordinator.dome_angle = float(last_state.state)
             except ValueError:
                 pass
-
-    @property
-    def available(self) -> bool:
-        return True
 
     @property
     def native_value(self) -> float:
@@ -102,10 +90,9 @@ class DomeRotation(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEnti
         self.coordinator.async_update_listeners()
 
 
-class DomeSpeed(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEntity):
+class DomeSpeed(R2D2Entity, NumberEntity, RestoreEntity):
     """Dome rotation speed (1 = slow slew, 10 = instant snap)."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "dome_speed"
     _attr_native_min_value = 1.0
     _attr_native_max_value = 10.0
@@ -113,14 +100,8 @@ class DomeSpeed(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEntity)
     _attr_mode = NumberMode.SLIDER
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_dome_speed"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.address)},
-            name=coordinator.droid_name,
-            manufacturer="Sphero",
-            model="R2-D2 / Q5",
-        )
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -132,10 +113,6 @@ class DomeSpeed(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEntity)
                 pass
 
     @property
-    def available(self) -> bool:
-        return True  # speed preference is meaningful even when disconnected
-
-    @property
     def native_value(self) -> float:
         return float(self.coordinator.dome_speed)
 
@@ -144,10 +121,9 @@ class DomeSpeed(CoordinatorEntity[R2D2Coordinator], NumberEntity, RestoreEntity)
         self.async_write_ha_state()
 
 
-class VolumeControl(CoordinatorEntity[R2D2Coordinator], NumberEntity):
+class VolumeControl(R2D2Entity, NumberEntity):
     """Audio volume (0–100 %)."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "volume"
     _attr_native_min_value = 0.0
     _attr_native_max_value = 100.0
@@ -156,19 +132,9 @@ class VolumeControl(CoordinatorEntity[R2D2Coordinator], NumberEntity):
     _attr_mode = NumberMode.SLIDER
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_volume"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.address)},
-            name=coordinator.droid_name,
-            manufacturer="Sphero",
-            model="R2-D2 / Q5",
-        )
         self._current_value: float = 100.0
-
-    @property
-    def available(self) -> bool:
-        return True
 
     @property
     def native_value(self) -> float:

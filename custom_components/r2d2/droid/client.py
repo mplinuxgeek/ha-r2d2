@@ -11,7 +11,7 @@ from .constants import (
     MSG_CARRIAGE, MSG_MOVE, MSG_RESET_YAW, MSG_STABILIZATION,
     MSG_ACCELEROMETER, MSG_EXTENDED_SENSORS,
     MSG_AUDIO, MSG_AUDIO_VOLUME, MSG_AUDIO_STOP, MSG_LED,
-    SOP, EOP, ESC,
+    SOP, EOP,
 )
 from .data import ANIMATIONS, AUDIO, AudioMode, DriveFlags, LegAction
 from .protocol import build_packet, degrees_to_bytes, write_gatt, unescape_packet

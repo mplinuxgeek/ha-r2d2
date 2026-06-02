@@ -7,7 +7,7 @@
   ],
   "config_flow": true,
   "dependencies": ["bluetooth"],
-  "documentation": "https://github.com/bircoe/droid_controller",
+  "documentation": "https://github.com/mplinuxgeek/ha-r2d2",
   "integration_type": "device",
   "iot_class": "local_push",
   "codeowners": ["@mplinuxgeek"],

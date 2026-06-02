@@ -1,8 +1,6 @@
 import logging
 import struct
 
-from bleak.exc import BleakError
-
 from .constants import SOP, EOP, ESC, ESC_ESC, ESC_SOP, ESC_EOP
 
 _LOGGER = logging.getLogger(__name__)

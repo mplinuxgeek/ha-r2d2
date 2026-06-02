@@ -1,6 +1,7 @@
 """Sensor entities for the R2D2 integration."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,10 +14,9 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, DEGREE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .entity import R2D2Entity
 from .const import (
     DOMAIN,
     ATTR_ACCEL_X,
@@ -149,11 +149,10 @@ async def async_setup_entry(
     )
 
 
-class R2D2Sensor(CoordinatorEntity[R2D2Coordinator], SensorEntity):
+class R2D2Sensor(R2D2Entity, SensorEntity):
     """A sensor entity reading from the R2D2 coordinator data."""
 
     entity_description: R2D2SensorEntityDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -162,23 +161,14 @@ class R2D2Sensor(CoordinatorEntity[R2D2Coordinator], SensorEntity):
         description: R2D2SensorEntityDescription,
     ) -> None:
         """Initialise the sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.address)},
-            name=coordinator.droid_name,
-            manufacturer="Sphero",
-            model="R2-D2 / Q5",
-        )
 
     @property
     def available(self) -> bool:
-        """Return True if connected and data is present."""
-        if not (self.coordinator.droid is not None and self.coordinator.droid.connected):
-            return False
-        # Battery is available as soon as connected; sensor keys available after first push
-        return True
+        """Sensors only have meaning while the droid is connected and streaming."""
+        return self.coordinator.droid.connected
 
     @property
     def native_value(self) -> Any:
@@ -188,6 +178,6 @@ class R2D2Sensor(CoordinatorEntity[R2D2Coordinator], SensorEntity):
         val = self.coordinator.data.get(self.entity_description.data_key)
         # HA rejects non-finite floats for measurement sensors — return None
         # (unavailable) rather than letting them crash async_write_ha_state.
-        if isinstance(val, float) and not (val == val and val != float("inf") and val != float("-inf")):
+        if isinstance(val, float) and not math.isfinite(val):
             return None
         return val

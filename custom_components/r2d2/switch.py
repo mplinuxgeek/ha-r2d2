@@ -7,18 +7,16 @@ import random
 from typing import Any
 
 from homeassistant.components.logbook import async_log_entry
-
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import R2D2Coordinator
+from .entity import R2D2Entity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,29 +33,18 @@ async def async_setup_entry(
     ])
 
 
-class R2D2AllLightsSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity):
+class R2D2AllLightsSwitch(R2D2Entity, SwitchEntity):
     """Toggle all droid lights on/off.
 
     is_on is derived from coordinator.led_state so it stays in sync with the
     individual light entities — it is True only when every light is on.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "all_lights"
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_all_lights"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.address)},
-            name=coordinator.droid_name,
-            manufacturer="Sphero",
-            model="R2-D2 / Q5",
-        )
-
-    @property
-    def available(self) -> bool:
-        return True
 
     @property
     def is_on(self) -> bool:
@@ -88,14 +75,14 @@ class R2D2AllLightsSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity):
         self.coordinator.async_update_listeners()
 
 
-class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, RestoreEntity):
+class R2D2KeepAwakeSwitch(R2D2Entity, SwitchEntity, RestoreEntity):
     """Periodically play a random idle animation to prevent the droid sleeping.
 
-    Fires every 6–9 minutes (random). Always available so the preference can
-    be toggled even while disconnected; the loop simply skips if not connected.
+    Fires every 2–4 minutes (random), under the droid's ~5 min idle-sleep.
+    Always available so the preference can be toggled even while disconnected;
+    the loop simply skips if not connected.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "keep_awake"
 
     _IDLE_ANIMATIONS = ["idle_1", "idle_2", "idle_3"]
@@ -103,14 +90,8 @@ class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, Rest
     _MAX_INTERVAL = 240   # 4 minutes
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_keep_awake"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.address)},
-            name=coordinator.droid_name,
-            manufacturer="Sphero",
-            model="R2-D2 / Q5",
-        )
         self._is_on: bool = False
         self._task: asyncio.Task | None = None
 
@@ -125,10 +106,6 @@ class R2D2KeepAwakeSwitch(CoordinatorEntity[R2D2Coordinator], SwitchEntity, Rest
 
     async def async_will_remove_from_hass(self) -> None:
         self._cancel_task()
-
-    @property
-    def available(self) -> bool:
-        return True
 
     @property
     def is_on(self) -> bool:

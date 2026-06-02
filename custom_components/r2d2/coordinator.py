@@ -7,18 +7,6 @@ import time
 from datetime import timedelta
 from typing import Any
 
-_HEARTBEAT_TIMEOUT = 10   # seconds of sensor silence → phantom connection
-_WATCHDOG_INTERVAL = 10   # how often the watchdog fires
-_CONNECT_GRACE = 10       # seconds to wait for first packet after (re)connect/revive
-_SENSOR_PUSH_INTERVAL = 1.0  # min seconds between coordinator pushes from sensor stream
-_VERIFY_DELAY = 2.0       # seconds between post-connect sensor-stream re-enable kicks
-_VERIFY_ATTEMPTS = 3      # how many times to re-enable sensors if the stream doesn't start
-_WAKE_SETTLE = 2.0        # seconds to let a just-woken droid's motor controller come
-                          # online before the first command (else stance/move is dropped)
-_DRIVE_RESEND = 0.3       # seconds between re-asserting the latest drive vector while active
-_DRIVE_TIMEOUT = 1.5      # dead-man: auto-stop if no new drive command arrives within this
-_STANCE_SETTLE = 2.0      # seconds for the legs to reach tripod before drive commands land
-
 from homeassistant.components.bluetooth import (
     BluetoothChange,
     BluetoothScanningMode,
@@ -33,7 +21,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
-    DOMAIN,
     CONF_ADDRESS,
     CONF_NAME,
     ATTR_ACCEL_X,
@@ -53,6 +40,17 @@ from .droid.client import DroidClient
 _LOGGER = logging.getLogger(__name__)
 
 _POLL_INTERVAL = timedelta(seconds=30)
+_HEARTBEAT_TIMEOUT = 10   # seconds of sensor silence → phantom connection
+_WATCHDOG_INTERVAL = 10   # how often the watchdog fires
+_CONNECT_GRACE = 10       # seconds to wait for first packet after (re)connect/revive
+_SENSOR_PUSH_INTERVAL = 1.0  # min seconds between coordinator pushes from sensor stream
+_VERIFY_DELAY = 2.0       # seconds between post-connect sensor-stream re-enable kicks
+_VERIFY_ATTEMPTS = 3      # how many times to re-enable sensors if the stream doesn't start
+_WAKE_SETTLE = 2.0        # seconds to let a just-woken droid's motor controller come
+                          # online before the first command (else stance/move is dropped)
+_DRIVE_RESEND = 0.3       # seconds between re-asserting the latest drive vector while active
+_DRIVE_TIMEOUT = 1.5      # dead-man: auto-stop if no new drive command arrives within this
+_STANCE_SETTLE = 2.0      # seconds for the legs to reach tripod before drive commands land
 
 
 class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):

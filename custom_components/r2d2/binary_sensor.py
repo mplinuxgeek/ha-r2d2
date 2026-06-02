@@ -7,12 +7,11 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import R2D2Coordinator
+from .entity import R2D2Entity
 
 
 async def async_setup_entry(
@@ -24,26 +23,15 @@ async def async_setup_entry(
     async_add_entities([R2D2ConnectivitySensor(coordinator, entry)])
 
 
-class R2D2ConnectivitySensor(CoordinatorEntity[R2D2Coordinator], BinarySensorEntity):
+class R2D2ConnectivitySensor(R2D2Entity, BinarySensorEntity):
     """Reports whether the droid is currently connected."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "connected"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_connected"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.address)},
-            name=coordinator.droid_name,
-            manufacturer="Sphero",
-            model="R2-D2 / Q5",
-        )
-
-    @property
-    def available(self) -> bool:
-        return True
 
     @property
     def is_on(self) -> bool:
