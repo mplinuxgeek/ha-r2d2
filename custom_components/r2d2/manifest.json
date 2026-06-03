@@ -3,7 +3,7 @@
   "name": "Sphero R2D2 / Q5 Droid",
   "bluetooth": [
     {"local_name": "D2-*"},
-    {"local_name": "R2-*"}
+    {"local_name": "Q5-*"}
   ],
   "config_flow": true,
   "dependencies": ["bluetooth", "logbook"],
