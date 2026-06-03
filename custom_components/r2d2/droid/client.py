@@ -394,10 +394,20 @@ class DroidClient:
                                 label="get_board_revision")
         return data[0] if data else None
 
+    @staticmethod
+    def _format_mac(raw: str | None) -> str | None:
+        """Normalise the droid's MAC (e.g. 'e4b40a7179b9') to 'E4:B4:..:B9'."""
+        if not raw:
+            return None
+        hex_only = raw.replace(":", "").replace("-", "").strip().upper()
+        if len(hex_only) == 12 and all(c in "0123456789ABCDEF" for c in hex_only):
+            return ":".join(hex_only[i:i + 2] for i in range(0, 12, 2))
+        return raw.upper()
+
     async def get_mac_address(self) -> str | None:
         data = await self._send(MSG_GET_MAC_ADDRESS, expect_response=True,
                                 label="get_mac_address")
-        return self._decode_ascii(data)
+        return self._format_mac(self._decode_ascii(data))
 
     async def get_sku(self) -> str | None:
         data = await self._send(MSG_GET_SKU, expect_response=True, label="get_sku")

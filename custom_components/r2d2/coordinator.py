@@ -329,7 +329,6 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 device.id,
                 sw_version=info.get("sw_version"),
                 hw_version=str(info["board_revision"]) if "board_revision" in info else None,
-                serial_number=info.get("sku"),
             )
         self.async_update_listeners()
 
