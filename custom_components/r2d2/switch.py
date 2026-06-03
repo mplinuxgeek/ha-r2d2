@@ -30,6 +30,7 @@ async def async_setup_entry(
     async_add_entities([
         R2D2AllLightsSwitch(coordinator, entry),
         R2D2KeepAwakeSwitch(coordinator, entry),
+        R2D2IdleAnimationsSwitch(coordinator, entry),
     ])
 
 
@@ -153,3 +154,46 @@ class R2D2KeepAwakeSwitch(R2D2Entity, SwitchEntity, RestoreEntity):
                 )
             except Exception as exc:
                 _LOGGER.debug("Keep-awake animation failed: %s", exc)
+
+
+class R2D2IdleAnimationsSwitch(R2D2Entity, SwitchEntity, RestoreEntity):
+    """Let the droid autonomously play idle fidget animations on its own.
+
+    The preference is stored on the coordinator and re-applied on every connect
+    (the droid forgets it across a power cycle). Always available so it can be
+    toggled while disconnected.
+    """
+
+    _attr_translation_key = "idle_animations"
+
+    def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_idle_animations"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            self.coordinator.idle_animations = last_state.state == STATE_ON
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.idle_animations
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.idle_animations = True
+        if self.coordinator.droid.connected:
+            try:
+                await self.coordinator.droid.enable_idle_animations(True)
+            except Exception as exc:
+                _LOGGER.debug("idle_animations on failed: %s", exc)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.idle_animations = False
+        if self.coordinator.droid.connected:
+            try:
+                await self.coordinator.droid.enable_idle_animations(False)
+            except Exception as exc:
+                _LOGGER.debug("idle_animations off failed: %s", exc)
+        self.async_write_ha_state()

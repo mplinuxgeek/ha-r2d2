@@ -71,6 +71,7 @@ async def async_setup_entry(
         for description in BUTTON_DESCRIPTIONS
     ]
     entities.append(R2D2ReconnectButton(coordinator, entry))
+    entities.append(R2D2StopAnimationButton(coordinator, entry))
     async_add_entities(entities)
 
 
@@ -110,3 +111,18 @@ class R2D2ReconnectButton(R2D2Entity, ButtonEntity):
         """Reconnect to the droid and confirm with a whisper."""
         await self.coordinator.async_reconnect(force=True)
         await self.coordinator.droid.animate("wwm_whisper")
+
+
+class R2D2StopAnimationButton(R2D2Entity, ButtonEntity):
+    """Cut the current animation short. No-op (no wake) when disconnected —
+    there's nothing playing on a sleeping droid."""
+
+    _attr_translation_key = "stop_animation"
+
+    def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_stop_animation"
+
+    async def async_press(self) -> None:
+        if self.coordinator.droid.connected:
+            await self.coordinator.droid.stop_animation()

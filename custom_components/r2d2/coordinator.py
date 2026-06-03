@@ -19,6 +19,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -77,6 +78,15 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.model: str = entry.data.get(CONF_MODEL) or detect_model(self.droid_name)
         self.droid = DroidClient(self.address, model=self.model)
         self.droid.reconnect_hook = self._reconnect_for_send
+        self.droid.collision_callback = self._on_collision
+        self.droid.battery_state_callback = self._on_battery_state
+        self.droid.sleep_callback = self._on_sleep_notify
+        # Latest pushed battery state enum (None until the droid reports one).
+        self.battery_state: int | None = None
+        # Current audio volume as a percentage (read from the droid on connect).
+        self.audio_volume_pct: float | None = None
+        # Dispatcher signal the collision event entity listens on.
+        self.signal_collision = f"{DOMAIN}_{entry.entry_id}_collision"
         self.sensor_data: dict[str, Any] = {}
         # Static identity read once from the droid (firmware/MAC/SKU); surfaced
         # by the diagnostic sensors and pushed into the device registry.
@@ -91,6 +101,7 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.dome_angle: float = 0.0   # last commanded angle
         self.dome_speed: int = 10      # 1 = slowest slew, 10 = instant
         self.keep_awake: bool = False  # set by R2D2KeepAwakeSwitch
+        self.idle_animations: bool = False  # set by R2D2IdleAnimationsSwitch
         self._watchdog_task: asyncio.Task | None = None
         self._verify_task: asyncio.Task | None = None  # post-connect sensor-stream kick
         self._drive_target: tuple[int, int, int] | None = None  # (speed, heading, flags)
@@ -309,6 +320,73 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("_verify_sensor_stream: re-enable failed: %s", exc)
                 return
 
+    @callback
+    def _on_collision(self, data: dict) -> None:
+        """Forward a collision notification to the event entity."""
+        _LOGGER.info("_on_collision: droid bumped: %s", data)
+        async_dispatcher_send(self.hass, self.signal_collision, data)
+
+    @callback
+    def _on_battery_state(self, state: int) -> None:
+        """Store a pushed battery-state change and refresh dependent entities."""
+        _LOGGER.debug("_on_battery_state: %d", state)
+        self.battery_state = state
+        self.async_update_listeners()
+
+    @callback
+    def _on_sleep_notify(self, kind: str) -> None:
+        """React to the droid's own sleep notifications.
+
+        Far more accurate than inferring sleep from sensor silence: the droid
+        tells us before (will_sleep) and after (did_sleep) it idle-sleeps.
+        """
+        if kind == "will_sleep":
+            if self.keep_awake:
+                _LOGGER.info("_on_sleep_notify: will-sleep + keep_awake — deferring")
+                self.hass.async_create_task(self._defer_sleep())
+            else:
+                _LOGGER.debug("_on_sleep_notify: will-sleep — letting droid rest")
+        else:  # did_sleep
+            _LOGGER.info("_on_sleep_notify: droid slept")
+            self._last_sensor_time = None
+            self.async_update_listeners()
+            if not self.keep_awake:
+                self.hass.async_create_task(self._disconnect_for_sleep())
+
+    async def _defer_sleep(self) -> None:
+        """Send a benign activity command to reset the droid's idle timer."""
+        try:
+            await self.droid.enable_all_sensors()
+            self._connected_at = time.monotonic()
+        except Exception as exc:
+            _LOGGER.debug("_defer_sleep: failed: %s", exc)
+
+    async def _disconnect_for_sleep(self) -> None:
+        """Cleanly drop our end after the droid slept so the socket is fresh."""
+        try:
+            await self.droid.disconnect()
+        except Exception as exc:
+            _LOGGER.debug("_disconnect_for_sleep: %s", exc)
+        self.async_update_listeners()
+
+    async def _apply_idle_animations(self) -> None:
+        """Push the current idle-animations preference to the droid."""
+        try:
+            await self.droid.enable_idle_animations(self.idle_animations)
+        except Exception as exc:
+            _LOGGER.debug("_apply_idle_animations: failed: %s", exc)
+
+    async def _sync_volume(self) -> None:
+        """Read the droid's current audio volume into audio_volume_pct."""
+        try:
+            raw = await self.droid.get_volume()
+        except Exception as exc:
+            _LOGGER.debug("_sync_volume: failed: %s", exc)
+            return
+        if raw is not None:
+            self.audio_volume_pct = round(raw * 100 / 255)
+            self.async_update_listeners()
+
     async def _fetch_device_info(self) -> None:
         """Read firmware/MAC/SKU once and publish to entities + device registry."""
         try:
@@ -453,6 +531,12 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # the reconnect (and the user's command) isn't held up.
                     if not self.device_info_data:
                         self.hass.async_create_task(self._fetch_device_info())
+                    # Sync the volume slider to the droid's actual volume.
+                    self.hass.async_create_task(self._sync_volume())
+                    # Re-apply the idle-animations preference (the droid resets
+                    # it to off across a power cycle).
+                    if self.idle_animations:
+                        self.hass.async_create_task(self._apply_idle_animations())
                     _LOGGER.info("async_reconnect: droid %s reconnected (attempt %d)", self.address, attempt)
                     self.hass.async_create_task(self.async_refresh())
                     return

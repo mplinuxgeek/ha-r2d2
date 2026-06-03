@@ -134,14 +134,16 @@ class VolumeControl(R2D2Entity, NumberEntity):
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_volume"
-        self._current_value: float = 100.0
 
     @property
     def native_value(self) -> float:
-        return self._current_value
+        # Reflect the droid's real volume once read on connect; assume full
+        # until then.
+        pct = self.coordinator.audio_volume_pct
+        return float(pct) if pct is not None else 100.0
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_ensure_connected()
         await self.coordinator.droid.set_volume(int(value * 255 / 100))
-        self._current_value = value
+        self.coordinator.audio_volume_pct = value
         self.async_write_ha_state()

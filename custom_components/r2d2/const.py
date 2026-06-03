@@ -16,4 +16,4 @@ ATTR_GYRO_Y = "gyro_y"
 ATTR_GYRO_Z = "gyro_z"
 ATTR_RSSI = "rssi"
 
-PLATFORMS = ["binary_sensor", "button", "light", "number", "select", "sensor", "switch"]
+PLATFORMS = ["binary_sensor", "button", "event", "light", "number", "select", "sensor", "switch"]

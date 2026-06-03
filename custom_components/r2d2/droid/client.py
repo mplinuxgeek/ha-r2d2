@@ -13,6 +13,11 @@ from .constants import (
     MSG_AUDIO, MSG_AUDIO_VOLUME, MSG_AUDIO_STOP, MSG_LED,
     MSG_GET_MAIN_APP_VERSION, MSG_GET_BOOTLOADER_VERSION,
     MSG_GET_BOARD_REVISION, MSG_GET_MAC_ADDRESS, MSG_GET_SKU,
+    MSG_CONFIGURE_COLLISION, COLLISION_DEFAULTS,
+    MSG_ENABLE_BATTERY_STATE_NOTIFY,
+    MSG_STOP_ANIMATION, MSG_IDLE_ANIMATIONS, MSG_GET_AUDIO_VOLUME,
+    NOTIFY_SENSOR_STREAM, NOTIFY_COLLISION, NOTIFY_BATTERY_STATE,
+    NOTIFY_WILL_SLEEP, NOTIFY_DID_SLEEP,
     FLAG_IS_RESPONSE, FLAG_HAS_TARGET_ID, FLAG_HAS_SOURCE_ID,
     SOP, EOP,
 )
@@ -59,6 +64,9 @@ class DroidClient:
         # _process_packet when the matching response notification arrives.
         self._response_waiters: dict[tuple[int, int, int], asyncio.Future] = {}
         self.sensor_callback = None   # callable(dict) — receives live sensor data
+        self.collision_callback = None  # callable(dict) — physical bump reported
+        self.battery_state_callback = None  # callable(int) — battery state enum
+        self.sleep_callback = None    # callable(str) — "will_sleep" / "did_sleep"
         self.reconnect_hook = None    # async callable() — set by coordinator
 
     # ------------------------------------------------------------------
@@ -309,11 +317,55 @@ class DroidClient:
                 _LOGGER.debug("_process_packet: response with no waiter (did=%02x cid=%02x seq=%d)", did, cid, seq)
             return
 
-        if did == 0x18 and cid == 0x02:
-            _LOGGER.debug("_process_packet: sensor packet, payload_len=%d", len(body) - i - 1)
-            self._handle_sensor_packet(body[i:-1])  # strip CHK
+        payload = body[i:-1]  # async-notification payload (strip CHK)
+        ident = (did, cid)
+        if ident == NOTIFY_SENSOR_STREAM:
+            _LOGGER.debug("_process_packet: sensor packet, payload_len=%d", len(payload))
+            self._handle_sensor_packet(payload)
+        elif ident == NOTIFY_COLLISION:
+            self._handle_collision(payload)
+        elif ident == NOTIFY_BATTERY_STATE:
+            if payload and self.battery_state_callback:
+                _LOGGER.debug("_process_packet: battery state notify -> %d", payload[0])
+                self.battery_state_callback(payload[0])
+        elif ident == NOTIFY_WILL_SLEEP:
+            _LOGGER.debug("_process_packet: will-sleep notify")
+            if self.sleep_callback:
+                self.sleep_callback("will_sleep")
+        elif ident == NOTIFY_DID_SLEEP:
+            _LOGGER.debug("_process_packet: did-sleep notify")
+            if self.sleep_callback:
+                self.sleep_callback("did_sleep")
         else:
             _LOGGER.debug("_process_packet: unhandled async did=%02x cid=%02x", did, cid)
+
+    def _handle_collision(self, payload) -> None:
+        """Decode a collision_detected notification (18-byte payload)."""
+        if not self.collision_callback:
+            return
+        if len(payload) < 18:
+            _LOGGER.debug("_handle_collision: short payload (%d bytes)", len(payload))
+            return
+        try:
+            ax, ay, az, axis, px, py, pz, speed, ms = struct.unpack(
+                ">3hB3hBL", bytes(payload[:18]))
+        except struct.error as exc:
+            _LOGGER.debug("_handle_collision: unpack error: %s", exc)
+            return
+        data = {
+            "accel_x": round(ax / 4096, 4),
+            "accel_y": round(ay / 4096, 4),
+            "accel_z": round(az / 4096, 4),
+            "x_axis": bool(axis & 1),
+            "y_axis": bool(axis & 2),
+            "power_x": px,
+            "power_y": py,
+            "power_z": pz,
+            "speed": speed,
+            "time": ms / 1000,
+        }
+        _LOGGER.debug("_handle_collision: %s", data)
+        self.collision_callback(data)
 
     def _handle_sensor_packet(self, payload) -> None:
         n = len(payload) // 4
@@ -491,6 +543,15 @@ class DroidClient:
         payload = list(struct.pack('>H', anim_id))
         return await self._send(MSG_ANIMATION, payload, label=f"animate({animation})")
 
+    async def stop_animation(self):
+        """Cut the currently-playing animation short."""
+        return await self._send(MSG_STOP_ANIMATION, label="stop_animation")
+
+    async def enable_idle_animations(self, enable=True):
+        """Let the droid autonomously play idle fidget animations."""
+        return await self._send(MSG_IDLE_ANIMATIONS, [int(bool(enable))],
+                                label=f"idle_animations({enable})")
+
     # ------------------------------------------------------------------
     # Audio
     # ------------------------------------------------------------------
@@ -507,6 +568,11 @@ class DroidClient:
 
     async def set_volume(self, volume):
         return await self._send(MSG_AUDIO_VOLUME, [max(0, min(255, int(volume)))], label=f"volume({volume})")
+
+    async def get_volume(self) -> int | None:
+        """Read the droid's current audio volume (0-255)."""
+        data = await self._send(MSG_GET_AUDIO_VOLUME, expect_response=True, label="get_volume")
+        return data[0] if data else None
 
     async def stop_audio(self):
         return await self._send(MSG_AUDIO_STOP, label="stop_audio")
@@ -543,8 +609,26 @@ class DroidClient:
         payload = list(struct.pack('>I', mask))
         return await self._send(MSG_EXTENDED_SENSORS, payload, label="extended_sensors")
 
+    async def configure_collision_detection(self):
+        """Arm accelerometer-based collision reporting (uses tested defaults)."""
+        return await self._send(MSG_CONFIGURE_COLLISION, list(COLLISION_DEFAULTS),
+                                label="configure_collision")
+
+    async def enable_battery_state_notify(self, enable=True):
+        """Ask the droid to push battery state changes (charging/low/...)."""
+        return await self._send(MSG_ENABLE_BATTERY_STATE_NOTIFY, [int(bool(enable))],
+                                label=f"battery_state_notify({enable})")
+
     async def enable_all_sensors(self):
         _LOGGER.debug("enable_all_sensors: enabling accelerometer + extended sensors")
         await self.accelerometer()
         await self.enable_extended_sensors()
+        # Collision + battery-state pushes ride the same stream; best-effort so a
+        # failure here never blocks the core sensor arming (or the wake path).
+        for label, coro in (("collision", self.configure_collision_detection),
+                            ("battery_state_notify", self.enable_battery_state_notify)):
+            try:
+                await coro()
+            except Exception as exc:
+                _LOGGER.debug("enable_all_sensors: %s enable failed: %s", label, exc)
         _LOGGER.debug("enable_all_sensors: done")

@@ -30,6 +30,36 @@ MSG_AUDIO_VOLUME      = bytes([0x0A, 0x1A, 0x08])
 MSG_AUDIO_STOP        = bytes([0x0A, 0x1A, 0x0A])
 MSG_LED               = bytes([0x0A, 0x1A, 0x0E])  # set_all_leds_with_16_bit_mask
 
+# Collision detection (DID 0x18). configure_collision_detection payload is
+# [method, x_thr, y_thr, x_speed, y_speed, dead_time]; method 1 = accelerometer.
+MSG_CONFIGURE_COLLISION = bytes([0x0A, 0x18, 0x11])
+COLLISION_DEFAULTS = (0x01, 90, 130, 90, 130, 1)  # spherov2's tested defaults
+
+# Battery-state change notifications (DID 0x13).
+MSG_ENABLE_BATTERY_STATE_NOTIFY = bytes([0x0A, 0x13, 0x05])
+
+# Animatronic extras (DID 0x17).
+MSG_STOP_ANIMATION    = bytes([0x0A, 0x17, 0x2B])
+MSG_IDLE_ANIMATIONS   = bytes([0x0A, 0x17, 0x2C])  # payload [enable]
+
+# Audio (DID 0x1A).
+MSG_GET_AUDIO_VOLUME  = bytes([0x0A, 0x1A, 0x09])  # response: 1 byte (0-255)
+
+# Async-notification identifiers (DID, CID) the droid pushes unprompted.
+NOTIFY_SENSOR_STREAM = (0x18, 0x02)
+NOTIFY_COLLISION     = (0x18, 0x12)
+NOTIFY_BATTERY_STATE = (0x13, 0x06)
+NOTIFY_WILL_SLEEP    = (0x13, 0x19)
+NOTIFY_DID_SLEEP     = (0x13, 0x1A)
+
+# Battery state enum (battery_state_changed_notify payload byte).
+BATTERY_STATE_CHARGED      = 0
+BATTERY_STATE_CHARGING     = 1
+BATTERY_STATE_NOT_CHARGING = 2
+BATTERY_STATE_OK           = 3
+BATTERY_STATE_LOW          = 4
+BATTERY_STATE_CRITICAL     = 5
+
 # System-info getters (DID 0x11). These return a response packet whose payload
 # carries the requested value — see DroidClient._send(expect_response=True).
 MSG_GET_MAIN_APP_VERSION   = bytes([0x0A, 0x11, 0x00])  # 3x uint16: maj.min.rev
