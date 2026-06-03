@@ -21,6 +21,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    DOMAIN,
     CONF_ADDRESS,
     CONF_NAME,
     ATTR_ACCEL_X,
@@ -107,10 +108,21 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 {"address": self.address},
                 BluetoothScanningMode.ACTIVE,
             )
-        # Start phantom-breaker watchdog
-        self._watchdog_task = self.hass.async_create_task(self._heartbeat_watchdog())
-        # Non-blocking initial connect — failure is normal if droid is off at boot
-        self.hass.async_create_task(self._initial_connect())
+        # Start phantom-breaker watchdog as a background task.  A plain
+        # hass.async_create_task is tracked as a startup task and HA blocks
+        # "wrapping up the start up phase" until it finishes — but the watchdog
+        # is a while-True loop that never finishes, so it would stall startup
+        # until HA times out.  Background tasks are exempt from that wait and
+        # are auto-cancelled on entry unload.
+        self._watchdog_task = self.entry.async_create_background_task(
+            self.hass, self._heartbeat_watchdog(), name=f"{DOMAIN}_watchdog_{self.address}"
+        )
+        # Non-blocking initial connect — failure is normal if droid is off at
+        # boot.  Also a background task so its connect/retry sleeps don't hold
+        # up the startup phase.
+        self.entry.async_create_background_task(
+            self.hass, self._initial_connect(), name=f"{DOMAIN}_initial_connect_{self.address}"
+        )
 
     async def _initial_connect(self) -> None:
         """Attempt connect at startup; swallow errors — BLE callback will retry."""
