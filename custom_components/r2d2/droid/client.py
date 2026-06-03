@@ -11,6 +11,9 @@ from .constants import (
     MSG_CARRIAGE, MSG_MOVE, MSG_RESET_YAW, MSG_STABILIZATION,
     MSG_ACCELEROMETER, MSG_EXTENDED_SENSORS,
     MSG_AUDIO, MSG_AUDIO_VOLUME, MSG_AUDIO_STOP, MSG_LED,
+    MSG_GET_MAIN_APP_VERSION, MSG_GET_BOOTLOADER_VERSION,
+    MSG_GET_BOARD_REVISION, MSG_GET_MAC_ADDRESS, MSG_GET_SKU,
+    FLAG_IS_RESPONSE, FLAG_HAS_TARGET_ID, FLAG_HAS_SOURCE_ID,
     SOP, EOP,
 )
 from .data import AUDIO, AudioMode, DEFAULT_MODEL, DriveFlags, LegAction, animations_for
@@ -52,6 +55,9 @@ class DroidClient:
         self._stance: str | None = None  # last commanded leg stance (tripod/bipod/waddle)
         self._seq = 0
         self._packet_buffer: list[int] = []
+        # Pending request/response futures keyed by (did, cid, seq); resolved by
+        # _process_packet when the matching response notification arrives.
+        self._response_waiters: dict[tuple[int, int, int], asyncio.Future] = {}
         self.sensor_callback = None   # callable(dict) — receives live sensor data
         self.reconnect_hook = None    # async callable() — set by coordinator
 
@@ -68,6 +74,7 @@ class DroidClient:
         self._stance = None             # stance unknown after a fresh connect
         self._seq = 0
         self._packet_buffer.clear()
+        self._cancel_response_waiters("reconnecting")
 
         _LOGGER.debug("connect: calling establish_connection for %s (device=%s)", self.address, ble_device)
         self._client = await establish_connection(
@@ -127,6 +134,16 @@ class DroidClient:
         else:
             _LOGGER.debug("_on_disconnect: intentional disconnect from %s", self.address)
         self._intentional_disconnect = False
+        self._cancel_response_waiters("disconnected")
+
+    def _cancel_response_waiters(self, reason: str) -> None:
+        """Fail any in-flight request/response futures (e.g. on disconnect)."""
+        if not self._response_waiters:
+            return
+        for waiter in list(self._response_waiters.values()):
+            if not waiter.done():
+                waiter.set_exception(RuntimeError(f"response cancelled: {reason}"))
+        self._response_waiters.clear()
 
     @property
     def connected(self) -> bool:
@@ -164,7 +181,10 @@ class DroidClient:
         finally:
             self._waking = False
 
-    async def _send(self, msg, payload=None, label=""):
+    async def _send(self, msg, payload=None, label="", expect_response=False, timeout=5.0):
+        """Send a command. If expect_response, wait for and return its response
+        payload bytes (raising on a device error); otherwise return the bool
+        write result as before."""
         cmd = label or msg.hex()
         if not self.connected:
             if self.reconnect_hook:
@@ -191,16 +211,38 @@ class DroidClient:
         if self._main_char is None:
             raise RuntimeError("Not connected — main characteristic unavailable")
 
-        packet = build_packet(msg, payload, seq=self._seq)
-        _LOGGER.debug("_send: seq=%d cmd='%s' packet=%s", self._seq, cmd, packet.hex())
+        seq = self._seq
+        packet = build_packet(msg, payload, seq=seq)
+        _LOGGER.debug("_send: seq=%d cmd='%s' packet=%s", seq, cmd, packet.hex())
         self._seq = (self._seq + 1) % _SEQ_MAX
+
+        waiter: asyncio.Future | None = None
+        key = (msg[1], msg[2], seq)  # (did, cid, seq) echoed back in the response
+        if expect_response:
+            waiter = asyncio.get_running_loop().create_future()
+            self._response_waiters[key] = waiter
+
         result = await write_gatt(self._client, self._main_char.uuid, packet, cmd)
         if result:
             self._last_command_time = asyncio.get_running_loop().time()
             _LOGGER.debug("_send: '%s' OK", cmd)
         else:
             _LOGGER.warning("_send: '%s' FAILED (write_gatt returned False)", cmd)
-        return result
+
+        if not expect_response:
+            return result
+        if not result:
+            self._response_waiters.pop(key, None)
+            raise RuntimeError(f"{cmd}: write failed, no response expected")
+        try:
+            err, data = await asyncio.wait_for(waiter, timeout)
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError(f"{cmd}: timed out waiting for response") from exc
+        finally:
+            self._response_waiters.pop(key, None)
+        if err != 0x00:
+            raise RuntimeError(f"{cmd}: device returned error 0x{err:02x}")
+        return data
 
     # ------------------------------------------------------------------
     # Notification handling — packets arrive fragmented (1 byte at a time)
@@ -239,17 +281,39 @@ class DroidClient:
             _LOGGER.debug("_process_packet: unescaped body too short (%d bytes), discarding", len(body))
             return
 
-        flags, did, cid, seq = body[0], body[1], body[2], body[3]
+        # Layout: FLAGS [TID] [SID] DID CID SEQ [ERR if response] DATA... CHK
+        i = 0
+        flags = body[i]; i += 1
+        if flags & FLAG_HAS_TARGET_ID:
+            i += 1
+        if flags & FLAG_HAS_SOURCE_ID:
+            i += 1
+        if len(body) < i + 4:
+            _LOGGER.debug("_process_packet: header truncated, discarding")
+            return
+        did, cid, seq = body[i], body[i + 1], body[i + 2]
+        i += 3
         _LOGGER.debug(
             "_process_packet: flags=%02x did=%02x cid=%02x seq=%d body_len=%d",
             flags, did, cid, seq, len(body),
         )
 
+        if flags & FLAG_IS_RESPONSE:
+            # Response to one of our requests: [ERR] DATA... CHK
+            err = body[i]; i += 1
+            data = bytes(body[i:-1])  # strip CHK
+            waiter = self._response_waiters.get((did, cid, seq))
+            if waiter is not None and not waiter.done():
+                waiter.set_result((err, data))
+            else:
+                _LOGGER.debug("_process_packet: response with no waiter (did=%02x cid=%02x seq=%d)", did, cid, seq)
+            return
+
         if did == 0x18 and cid == 0x02:
-            _LOGGER.debug("_process_packet: sensor packet, payload_len=%d", len(body) - 5)
-            self._handle_sensor_packet(body[4:-1])  # strip CHK
+            _LOGGER.debug("_process_packet: sensor packet, payload_len=%d", len(body) - i - 1)
+            self._handle_sensor_packet(body[i:-1])  # strip CHK
         else:
-            _LOGGER.debug("_process_packet: unhandled did=%02x cid=%02x (not a sensor packet)", did, cid)
+            _LOGGER.debug("_process_packet: unhandled async did=%02x cid=%02x", did, cid)
 
     def _handle_sensor_packet(self, payload) -> None:
         n = len(payload) // 4
@@ -296,6 +360,70 @@ class DroidClient:
         except Exception as exc:
             _LOGGER.warning("battery: read failed: %s", exc)
             return None
+
+    # ------------------------------------------------------------------
+    # Device info (System Info, DID 0x11) — request/response getters
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _format_version(data: bytes) -> str | None:
+        """Decode a 3x uint16 version payload as 'major.minor.revision'."""
+        if len(data) < 6:
+            return None
+        major, minor, revision = struct.unpack(">3H", data[:6])
+        return f"{major}.{minor}.{revision}"
+
+    @staticmethod
+    def _decode_ascii(data: bytes) -> str | None:
+        """Decode an ASCII payload (MAC / SKU), trimming padding."""
+        text = bytes(data).decode("ascii", "ignore").replace("\x00", "").strip()
+        return text or None
+
+    async def get_main_app_version(self) -> str | None:
+        data = await self._send(MSG_GET_MAIN_APP_VERSION, expect_response=True,
+                                label="get_main_app_version")
+        return self._format_version(data)
+
+    async def get_bootloader_version(self) -> str | None:
+        data = await self._send(MSG_GET_BOOTLOADER_VERSION, expect_response=True,
+                                label="get_bootloader_version")
+        return self._format_version(data)
+
+    async def get_board_revision(self) -> int | None:
+        data = await self._send(MSG_GET_BOARD_REVISION, expect_response=True,
+                                label="get_board_revision")
+        return data[0] if data else None
+
+    async def get_mac_address(self) -> str | None:
+        data = await self._send(MSG_GET_MAC_ADDRESS, expect_response=True,
+                                label="get_mac_address")
+        return self._decode_ascii(data)
+
+    async def get_sku(self) -> str | None:
+        data = await self._send(MSG_GET_SKU, expect_response=True, label="get_sku")
+        return self._decode_ascii(data)
+
+    async def fetch_device_info(self) -> dict:
+        """Read the static identity fields once. Each is best-effort: a single
+        failing getter doesn't abort the rest."""
+        info: dict = {}
+        getters = (
+            ("sw_version", self.get_main_app_version),
+            ("bootloader_version", self.get_bootloader_version),
+            ("board_revision", self.get_board_revision),
+            ("mac_address", self.get_mac_address),
+            ("sku", self.get_sku),
+        )
+        for field, getter in getters:
+            try:
+                value = await getter()
+            except Exception as exc:
+                _LOGGER.debug("fetch_device_info: %s failed: %s", field, exc)
+                continue
+            if value is not None:
+                info[field] = value
+        _LOGGER.debug("fetch_device_info: %s", info)
+        return info
 
     # ------------------------------------------------------------------
     # Movement

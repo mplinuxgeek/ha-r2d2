@@ -30,6 +30,20 @@ MSG_AUDIO_VOLUME      = bytes([0x0A, 0x1A, 0x08])
 MSG_AUDIO_STOP        = bytes([0x0A, 0x1A, 0x0A])
 MSG_LED               = bytes([0x0A, 0x1A, 0x0E])  # set_all_leds_with_16_bit_mask
 
+# System-info getters (DID 0x11). These return a response packet whose payload
+# carries the requested value — see DroidClient._send(expect_response=True).
+MSG_GET_MAIN_APP_VERSION   = bytes([0x0A, 0x11, 0x00])  # 3x uint16: maj.min.rev
+MSG_GET_BOOTLOADER_VERSION = bytes([0x0A, 0x11, 0x01])  # 3x uint16
+MSG_GET_BOARD_REVISION     = bytes([0x0A, 0x11, 0x03])  # 1 byte
+MSG_GET_MAC_ADDRESS        = bytes([0x0A, 0x11, 0x06])  # ASCII
+MSG_GET_SKU                = bytes([0x0A, 0x11, 0x28])  # get_three_character_sku, ASCII
+
+# Packet flag bit (in the FLAGS byte) marking a packet as a response to a
+# request rather than an async notification.
+FLAG_IS_RESPONSE      = 0x01
+FLAG_HAS_TARGET_ID    = 0x10
+FLAG_HAS_SOURCE_ID    = 0x20
+
 # Packet framing
 SOP     = 0x8D
 EOP     = 0xD8

@@ -290,6 +290,18 @@
       },
       "rssi": {
         "name": "Signal Strength"
+      },
+      "firmware_version": {
+        "name": "Firmware Version"
+      },
+      "bootloader_version": {
+        "name": "Bootloader Version"
+      },
+      "mac_address": {
+        "name": "MAC Address"
+      },
+      "sku": {
+        "name": "SKU"
       }
     },
     "switch": {

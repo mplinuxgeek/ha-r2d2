@@ -18,6 +18,7 @@ from homeassistant.components.bluetooth import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -77,6 +78,9 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.droid = DroidClient(self.address, model=self.model)
         self.droid.reconnect_hook = self._reconnect_for_send
         self.sensor_data: dict[str, Any] = {}
+        # Static identity read once from the droid (firmware/MAC/SKU); surfaced
+        # by the diagnostic sensors and pushed into the device registry.
+        self.device_info_data: dict[str, Any] = {}
         self._cancel_bt_callback = None
         self._reconnecting: bool = False
         self._reconnect_lock = asyncio.Lock()
@@ -305,6 +309,30 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("_verify_sensor_stream: re-enable failed: %s", exc)
                 return
 
+    async def _fetch_device_info(self) -> None:
+        """Read firmware/MAC/SKU once and publish to entities + device registry."""
+        try:
+            info = await self.droid.fetch_device_info()
+        except Exception as exc:
+            _LOGGER.debug("_fetch_device_info: failed: %s", exc)
+            return
+        if not info:
+            return
+        self.device_info_data = info
+        _LOGGER.info("_fetch_device_info: %s", info)
+        # Mirror the version fields onto the device registry entry so they show
+        # on the device page.
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device(identifiers={(DOMAIN, self.address)})
+        if device is not None:
+            registry.async_update_device(
+                device.id,
+                sw_version=info.get("sw_version"),
+                hw_version=str(info["board_revision"]) if "board_revision" in info else None,
+                serial_number=info.get("sku"),
+            )
+        self.async_update_listeners()
+
     def _reset_led_state(self) -> None:
         """Mark all LEDs as off after every connect.
 
@@ -422,6 +450,10 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._last_sensor_time = None
                     self._reset_led_state()
                     self._start_sensor_verify()
+                    # Read the static identity fields once, in the background so
+                    # the reconnect (and the user's command) isn't held up.
+                    if not self.device_info_data:
+                        self.hass.async_create_task(self._fetch_device_info())
                     _LOGGER.info("async_reconnect: droid %s reconnected (attempt %d)", self.address, attempt)
                     self.hass.async_create_task(self.async_refresh())
                     return

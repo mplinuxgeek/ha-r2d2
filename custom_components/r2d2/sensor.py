@@ -12,7 +12,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, DEGREE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+from homeassistant.const import (
+    PERCENTAGE,
+    DEGREE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -43,6 +48,40 @@ _UNIT_DEG_S = "°/s"
 class R2D2SensorEntityDescription(SensorEntityDescription):
     """Describe an R2D2 sensor entity with its data key."""
     data_key: str = ""
+
+
+# Static identity fields read once from the droid (see coordinator
+# .device_info_data). Diagnostic, text-valued, and available whenever the value
+# has been read — they don't depend on the live sensor stream.
+INFO_SENSOR_DESCRIPTIONS: tuple[R2D2SensorEntityDescription, ...] = (
+    R2D2SensorEntityDescription(
+        key="firmware_version",
+        translation_key="firmware_version",
+        data_key="sw_version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    R2D2SensorEntityDescription(
+        key="bootloader_version",
+        translation_key="bootloader_version",
+        data_key="bootloader_version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    R2D2SensorEntityDescription(
+        key="mac_address",
+        translation_key="mac_address",
+        data_key="mac_address",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    R2D2SensorEntityDescription(
+        key="sku",
+        translation_key="sku",
+        data_key="sku",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+)
 
 
 SENSOR_DESCRIPTIONS: tuple[R2D2SensorEntityDescription, ...] = (
@@ -147,6 +186,10 @@ async def async_setup_entry(
         R2D2Sensor(coordinator, entry, description)
         for description in SENSOR_DESCRIPTIONS
     )
+    async_add_entities(
+        R2D2InfoSensor(coordinator, entry, description)
+        for description in INFO_SENSOR_DESCRIPTIONS
+    )
 
 
 class R2D2Sensor(R2D2Entity, SensorEntity):
@@ -181,3 +224,30 @@ class R2D2Sensor(R2D2Entity, SensorEntity):
         if isinstance(val, float) and not math.isfinite(val):
             return None
         return val
+
+
+class R2D2InfoSensor(R2D2Entity, SensorEntity):
+    """Static identity sensor (firmware/MAC/SKU) from coordinator.device_info_data."""
+
+    entity_description: R2D2SensorEntityDescription
+
+    def __init__(
+        self,
+        coordinator: R2D2Coordinator,
+        entry: ConfigEntry,
+        description: R2D2SensorEntityDescription,
+    ) -> None:
+        """Initialise the info sensor."""
+        super().__init__(coordinator, entry)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+
+    @property
+    def available(self) -> bool:
+        """Available once the value has been read; it's static thereafter."""
+        return self.entity_description.data_key in self.coordinator.device_info_data
+
+    @property
+    def native_value(self) -> Any:
+        """Return the cached identity value."""
+        return self.coordinator.device_info_data.get(self.entity_description.data_key)
