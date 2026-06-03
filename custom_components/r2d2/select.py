@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import R2D2Coordinator
-from .droid.data import ANIMATIONS, AUDIO
+from .droid.data import AUDIO
 from .entity import R2D2Entity
 
 
@@ -32,12 +32,14 @@ class AnimationSelect(R2D2Entity, SelectEntity):
     """Select an animation to play on the droid."""
 
     _attr_translation_key = "animation"
-    _attr_options = list(ANIMATIONS.keys())
 
     def __init__(self, coordinator: R2D2Coordinator, entry: ConfigEntry) -> None:
         """Initialise animation select."""
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_animation"
+        # Options depend on the droid model (R2-D2 and R2-Q5 expose different
+        # emotes), so build them from the model-specific table.
+        self._attr_options = list(coordinator.droid.animations.keys())
         self._current_option: str | None = None
 
     @property

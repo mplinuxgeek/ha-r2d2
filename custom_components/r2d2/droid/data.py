@@ -15,8 +15,50 @@ class AudioMode:
     PLAY_ONLY_IF_NOT_PLAYING = 0x01
     PLAY_AFTER_CURRENT       = 0x02
 
-ANIMATIONS = {
-    # Emotes
+# ---------------------------------------------------------------------------
+# Droid models
+#
+# Animations are played by numeric ID, and the *same ID means different things*
+# on the two droids.  This was confirmed against the original Sphero Star Wars
+# app's RobotAnimatorAnimationDefinitions table (see docs/APP_PROTOCOL_COMPARISON.md):
+#   * Emote IDs 7-24 diverge between R2-D2 and R2-Q5.
+#   * Charger (0-6), Idle (25-27) and WWM (31-54) IDs are identical on both.
+# So we keep a per-model animation table and pick it from the droid's model,
+# which is auto-detected from its advertised BLE name prefix (D2- vs Q5-).
+# ---------------------------------------------------------------------------
+
+MODEL_R2D2 = "R2-D2"
+MODEL_R2Q5 = "R2-Q5"
+DEFAULT_MODEL = MODEL_R2Q5   # fall back to Q5 (the integration's original set)
+
+# Charger / idle "fidget" animations while docked — same IDs on both droids.
+_CHARGER = {
+    "charger_1": 0, "charger_2": 1, "charger_3": 2, "charger_4": 3,
+    "charger_5": 4, "charger_6": 5, "charger_7": 6,
+}
+
+# Emotes (IDs 7-24) — these DIFFER between the two droids.
+_EMOTES_R2D2 = {
+    "alarm":     7,
+    "angry":     8,
+    "annoyed":   9,
+    "chatty":    10,
+    "drive":     11,
+    "excited":   12,
+    "happy":     13,
+    "ion_blast": 14,
+    "laugh":     15,
+    "no":        16,
+    "sad":       17,
+    "sassy":     18,
+    "scared":    19,
+    "spin":      20,   # R2-D2 only
+    "yes":       21,
+    "scan":      22,
+    "sleep":     23,   # R2-D2 only
+    "surprised": 24,
+}
+_EMOTES_R2Q5 = {
     "alarm":         7,
     "angry":         8,
     "attention":     9,
@@ -30,14 +72,17 @@ ANIMATIONS = {
     "retreat":       17,
     "fiery":         18,
     "understood":    19,
+    # 20 unused on R2-Q5
     "yes":           21,
     "scan":          22,
+    # 23 unused on R2-Q5
     "surprised":     24,
-    # Idle
-    "idle_1": 25,
-    "idle_2": 26,
-    "idle_3": 27,
-    # WWM (When Will Meet)
+}
+
+_IDLE = {"idle_1": 25, "idle_2": 26, "idle_3": 27}
+
+# WWM ("Watch With Me") IDs 31-54 — identical on both droids.
+_WWM = {
     "wwm_angry":       31,
     "wwm_anxious":     32,
     "wwm_bow":         33,
@@ -62,11 +107,43 @@ ANIMATIONS = {
     "wwm_whisper":     52,
     "wwm_yelling":     53,
     "wwm_yoohoo":      54,
-    "motor":           55,
-    # Aliases
-    "happy": 40,
-    "sad":   47,
 }
+
+# R2-D2 has happy/sad as real emotes (13/17); R2-Q5 doesn't, so for Q5 we alias
+# them to the closest WWM equivalents to keep those friendly names available.
+ANIMATIONS_R2D2 = {**_EMOTES_R2D2, **_WWM, **_IDLE, **_CHARGER}
+ANIMATIONS_R2Q5 = {
+    **_EMOTES_R2Q5, **_WWM, **_IDLE, **_CHARGER,
+    "happy": 40,  # alias → wwm_happy
+    "sad":   47,  # alias → wwm_sad
+}
+
+_ANIMATION_TABLES = {MODEL_R2D2: ANIMATIONS_R2D2, MODEL_R2Q5: ANIMATIONS_R2Q5}
+
+
+def detect_model(name: str | None) -> str:
+    """Infer the droid model from its advertised BLE name.
+
+    R2-D2 advertises as ``D2-xxxx`` and R2-Q5 as ``Q5-xxxx``.  Anything we
+    can't classify falls back to DEFAULT_MODEL so existing setups keep their
+    previous (R2-Q5) behaviour.
+    """
+    if name:
+        p = name.strip().upper()
+        if p.startswith("D2") or "R2-D2" in p:
+            return MODEL_R2D2
+        if p.startswith("Q5") or "R2-Q5" in p:
+            return MODEL_R2Q5
+    return DEFAULT_MODEL
+
+
+def animations_for(model: str | None) -> dict[str, int]:
+    """Return the animation name→ID table for a droid model."""
+    return _ANIMATION_TABLES.get(model, ANIMATIONS_R2Q5)
+
+
+# Backwards-compatible default table (R2-Q5) for any external references.
+ANIMATIONS = ANIMATIONS_R2Q5
 
 AUDIO = {
     "fall":             1609,

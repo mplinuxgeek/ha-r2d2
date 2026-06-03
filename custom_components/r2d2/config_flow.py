@@ -11,7 +11,8 @@ from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ADDRESS
 
-from .const import DOMAIN, CONF_NAME
+from .const import DOMAIN, CONF_NAME, CONF_MODEL
+from .droid.data import detect_model
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class R2D2ConfigFlow(ConfigFlow, domain=DOMAIN):
                 data={
                     CONF_ADDRESS: self._address,
                     CONF_NAME: self._name,
+                    CONF_MODEL: detect_model(self._name),
                 },
             )
 
@@ -90,6 +92,7 @@ class R2D2ConfigFlow(ConfigFlow, domain=DOMAIN):
                     data={
                         CONF_ADDRESS: address,
                         CONF_NAME: name,
+                        CONF_MODEL: detect_model(name),
                     },
                 )
 

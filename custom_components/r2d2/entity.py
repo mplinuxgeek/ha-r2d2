@@ -27,7 +27,7 @@ class R2D2Entity(CoordinatorEntity[R2D2Coordinator]):
             identifiers={(DOMAIN, coordinator.address)},
             name=coordinator.droid_name,
             manufacturer="Sphero",
-            model="R2-D2 / Q5",
+            model=coordinator.model,
         )
 
     @property

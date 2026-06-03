@@ -1,6 +1,7 @@
 DOMAIN = "r2d2"
 CONF_ADDRESS = "address"
 CONF_NAME = "name"
+CONF_MODEL = "model"   # "R2-D2" or "R2-Q5"; auto-detected from the BLE name
 
 # Sensor data keys
 ATTR_ACCEL_X = "accel_x"

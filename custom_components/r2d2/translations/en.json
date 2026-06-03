@@ -130,9 +130,22 @@
           "wwm_whisper": "WWM Whisper",
           "wwm_yelling": "WWM Yelling",
           "wwm_yoohoo": "WWM Yoohoo",
-          "motor": "Motor",
           "happy": "Happy",
-          "sad": "Sad"
+          "sad": "Sad",
+          "annoyed": "Annoyed",
+          "chatty": "Chatty",
+          "ion_blast": "Ion Blast",
+          "sassy": "Sassy",
+          "scared": "Scared",
+          "spin": "Spin",
+          "sleep": "Sleep",
+          "charger_1": "Charger 1",
+          "charger_2": "Charger 2",
+          "charger_3": "Charger 3",
+          "charger_4": "Charger 4",
+          "charger_5": "Charger 5",
+          "charger_6": "Charger 6",
+          "charger_7": "Charger 7"
         }
       },
       "audio": {

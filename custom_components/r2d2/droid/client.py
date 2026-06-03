@@ -13,7 +13,7 @@ from .constants import (
     MSG_AUDIO, MSG_AUDIO_VOLUME, MSG_AUDIO_STOP, MSG_LED,
     SOP, EOP,
 )
-from .data import ANIMATIONS, AUDIO, AudioMode, DriveFlags, LegAction
+from .data import AUDIO, AudioMode, DEFAULT_MODEL, DriveFlags, LegAction, animations_for
 from .protocol import build_packet, degrees_to_bytes, write_gatt, unescape_packet
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,8 +38,12 @@ class DroidClient:
     WAKE_SETTLE = 2.0         # seconds for a just-woken droid's motor controller to come
                               # online before the first command (else stance/move is dropped)
 
-    def __init__(self, address: str) -> None:
+    def __init__(self, address: str, model: str | None = None) -> None:
         self.address = address
+        self.model = model or DEFAULT_MODEL
+        # Animation IDs are model-specific (emote IDs 7-24 differ between
+        # R2-D2 and R2-Q5); pick the right name→ID table up front.
+        self.animations = animations_for(self.model)
         self._client: BleakClient | None = None
         self._main_char = None
         self._intentional_disconnect = False
@@ -338,9 +342,12 @@ class DroidClient:
 
     async def animate(self, animation):
         if isinstance(animation, str):
-            if animation not in ANIMATIONS:
-                raise ValueError(f"Unknown animation '{animation}'. Known: {list(ANIMATIONS)}")
-            anim_id = ANIMATIONS[animation]
+            if animation not in self.animations:
+                raise ValueError(
+                    f"Unknown animation '{animation}' for {self.model}. "
+                    f"Known: {list(self.animations)}"
+                )
+            anim_id = self.animations[animation]
         else:
             anim_id = int(animation)
         payload = list(struct.pack('>H', anim_id))

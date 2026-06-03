@@ -24,6 +24,7 @@ from .const import (
     DOMAIN,
     CONF_ADDRESS,
     CONF_NAME,
+    CONF_MODEL,
     ATTR_ACCEL_X,
     ATTR_ACCEL_Y,
     ATTR_ACCEL_Z,
@@ -37,6 +38,7 @@ from .const import (
     ATTR_RSSI,
 )
 from .droid.client import DroidClient
+from .droid.data import detect_model
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +70,11 @@ class R2D2Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self.address: str = entry.data[CONF_ADDRESS]
         self.droid_name: str = entry.data.get(CONF_NAME, f"Droid {self.address}")
-        self.droid = DroidClient(self.address)
+        # Prefer an explicitly stored model; otherwise auto-detect from the BLE
+        # name (D2- → R2-D2, Q5- → R2-Q5).  Older entries have no stored model,
+        # so detection from the saved name keeps them working.
+        self.model: str = entry.data.get(CONF_MODEL) or detect_model(self.droid_name)
+        self.droid = DroidClient(self.address, model=self.model)
         self.droid.reconnect_hook = self._reconnect_for_send
         self.sensor_data: dict[str, Any] = {}
         self._cancel_bt_callback = None
