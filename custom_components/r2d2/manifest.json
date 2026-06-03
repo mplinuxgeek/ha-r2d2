@@ -6,7 +6,7 @@
     {"local_name": "R2-*"}
   ],
   "config_flow": true,
-  "dependencies": ["bluetooth"],
+  "dependencies": ["bluetooth", "logbook"],
   "documentation": "https://github.com/mplinuxgeek/ha-r2d2",
   "integration_type": "device",
   "iot_class": "local_push",

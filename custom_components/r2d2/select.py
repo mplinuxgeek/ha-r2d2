@@ -1,6 +1,7 @@
 """Select entities for the R2D2 integration."""
 from __future__ import annotations
 
+from homeassistant.components.logbook import async_log_entry
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -50,6 +51,18 @@ class AnimationSelect(R2D2Entity, SelectEntity):
         await self.coordinator.droid.animate(option)
         self._current_option = option
         self.async_write_ha_state()
+        # A select only logs to the logbook when its value *changes*, so
+        # replaying the same animation (the common automation case) would leave
+        # no record.  Log the action explicitly every time, carrying the call
+        # context so the entry is attributed to the triggering automation.
+        async_log_entry(
+            self.hass,
+            self.name,
+            f"played animation {option}",
+            DOMAIN,
+            self.entity_id,
+            self._context,
+        )
 
 
 class AudioSelect(R2D2Entity, SelectEntity):
@@ -75,3 +88,13 @@ class AudioSelect(R2D2Entity, SelectEntity):
         await self.coordinator.droid.play_audio(option)
         self._current_option = option
         self.async_write_ha_state()
+        # Same as the animation select: log every play so replaying the same
+        # clip still produces a logbook entry, attributed to the caller.
+        async_log_entry(
+            self.hass,
+            self.name,
+            f"played audio {option}",
+            DOMAIN,
+            self.entity_id,
+            self._context,
+        )
