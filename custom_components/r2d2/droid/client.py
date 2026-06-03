@@ -344,13 +344,14 @@ class DroidClient:
         if not self.collision_callback:
             return
         if len(payload) < 18:
-            _LOGGER.debug("_handle_collision: short payload (%d bytes)", len(payload))
+            _LOGGER.warning("_handle_collision: short payload (%d bytes): %s",
+                            len(payload), bytes(payload).hex())
             return
         try:
             ax, ay, az, axis, px, py, pz, speed, ms = struct.unpack(
                 ">3hB3hBL", bytes(payload[:18]))
         except struct.error as exc:
-            _LOGGER.debug("_handle_collision: unpack error: %s", exc)
+            _LOGGER.warning("_handle_collision: unpack error: %s", exc)
             return
         data = {
             "accel_x": round(ax / 4096, 4),
@@ -610,9 +611,12 @@ class DroidClient:
         return await self._send(MSG_EXTENDED_SENSORS, payload, label="extended_sensors")
 
     async def configure_collision_detection(self):
-        """Arm accelerometer-based collision reporting (uses tested defaults)."""
-        return await self._send(MSG_CONFIGURE_COLLISION, list(COLLISION_DEFAULTS),
-                                label="configure_collision")
+        """Arm accelerometer-based collision reporting."""
+        result = await self._send(MSG_CONFIGURE_COLLISION, list(COLLISION_DEFAULTS),
+                                  label="configure_collision")
+        _LOGGER.info("configure_collision_detection: armed=%s params=%s",
+                     bool(result), COLLISION_DEFAULTS)
+        return result
 
     async def enable_battery_state_notify(self, enable=True):
         """Ask the droid to push battery state changes (charging/low/...)."""
@@ -625,10 +629,11 @@ class DroidClient:
         await self.enable_extended_sensors()
         # Collision + battery-state pushes ride the same stream; best-effort so a
         # failure here never blocks the core sensor arming (or the wake path).
+        # Log at WARNING if arming fails so a silent collision config is visible.
         for label, coro in (("collision", self.configure_collision_detection),
                             ("battery_state_notify", self.enable_battery_state_notify)):
             try:
                 await coro()
             except Exception as exc:
-                _LOGGER.debug("enable_all_sensors: %s enable failed: %s", label, exc)
+                _LOGGER.warning("enable_all_sensors: %s enable failed: %s", label, exc)
         _LOGGER.debug("enable_all_sensors: done")

@@ -32,8 +32,23 @@ MSG_LED               = bytes([0x0A, 0x1A, 0x0E])  # set_all_leds_with_16_bit_ma
 
 # Collision detection (DID 0x18). configure_collision_detection payload is
 # [method, x_thr, y_thr, x_speed, y_speed, dead_time]; method 1 = accelerometer.
+# Lower threshold = more sensitive. spherov2's defaults (90/130) are tuned for
+# fast-rolling Sphero balls and are too high for a heavier legged R2 to trip, so
+# we default more sensitive. dead_time is in 10ms units (how long to ignore
+# further impacts after one fires). Tune via the COLLISION_* values.
 MSG_CONFIGURE_COLLISION = bytes([0x0A, 0x18, 0x11])
-COLLISION_DEFAULTS = (0x01, 90, 130, 90, 130, 1)  # spherov2's tested defaults
+COLLISION_METHOD = 0x01            # accelerometer-based
+COLLISION_X_THRESHOLD = 50
+COLLISION_Y_THRESHOLD = 50
+COLLISION_X_SPEED = 50
+COLLISION_Y_SPEED = 50
+COLLISION_DEAD_TIME = 1            # x10ms
+COLLISION_DEFAULTS = (
+    COLLISION_METHOD,
+    COLLISION_X_THRESHOLD, COLLISION_Y_THRESHOLD,
+    COLLISION_X_SPEED, COLLISION_Y_SPEED,
+    COLLISION_DEAD_TIME,
+)
 
 # Battery-state change notifications (DID 0x13).
 MSG_ENABLE_BATTERY_STATE_NOTIFY = bytes([0x0A, 0x13, 0x05])
